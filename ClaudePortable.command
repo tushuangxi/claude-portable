@@ -72,7 +72,7 @@ if [ ! -f "$FIRST_RUN_FLAG" ]; then
     fi
 
     # 保存配置
-    API_BASE="$api_base" API_KEY="$api_key" python3 -c "
+    API_BASE="$api_base" API_KEY="$api_key" CONFIG_FILE="$CONFIG_FILE" python3 -c "
 import json, os
 config = {
     'providers': [{
@@ -87,7 +87,7 @@ config = {
     'proxy_port': 18080,
     'auto_start_proxy': True
 }
-with open(os.environ.get('CONFIG_FILE', '$CONFIG_FILE'), 'w') as f:
+with open(os.environ['CONFIG_FILE'], 'w') as f:
     json.dump(config, f, indent=2, ensure_ascii=False)
 " 2>/dev/null
 
@@ -105,13 +105,13 @@ CC_SWITCH_RUNNING=0
 
 if [ -f "$BIN_DIR/cc-switch" ]; then
     echo "  启动 CC Switch..."
-    # CC Switch 是 GUI 应用，启动后自动开启本地代理
-    open "$BIN_DIR/cc-switch" 2>/dev/null || "$BIN_DIR/cc-switch" &>/dev/null &
+    # 直接后台执行（不用 open，cc-switch 不是 .app bundle）
+    "$BIN_DIR/cc-switch" &>/dev/null &
     CC_SWITCH_PID=$!
 
     # 等待代理端口就绪（最多 10 秒）
     for i in $(seq 1 20); do
-        if curl -s "http://127.0.0.1:$CC_SWITCH_PORT" >/dev/null 2>&1; then
+        if nc -z 127.0.0.1 "$CC_SWITCH_PORT" 2>/dev/null; then
             CC_SWITCH_RUNNING=1
             break
         fi
@@ -132,10 +132,10 @@ fi
 
 # 直连模式：从配置文件读取
 if [ "$CC_SWITCH_RUNNING" -eq 0 ] && [ -f "$CONFIG_FILE" ]; then
-    eval "$(python3 -c "
+    eval "$(CONFIG_FILE="$CONFIG_FILE" python3 -c "
 import json, os
 try:
-    with open(os.environ.get('CONFIG_FILE', '$CONFIG_FILE')) as f:
+    with open(os.environ['CONFIG_FILE']) as f:
         d = json.load(f)
     providers = d.get('providers', [])
     active = d.get('active_provider')

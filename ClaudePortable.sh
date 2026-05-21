@@ -61,7 +61,7 @@ if [ -f "$BIN_DIR/cc-switch" ]; then
     "$BIN_DIR/cc-switch" &>/dev/null &
     CC_SWITCH_PID=$!
     for i in $(seq 1 20); do
-        if curl -s "http://127.0.0.1:$CC_SWITCH_PORT" >/dev/null 2>&1; then
+        if nc -z 127.0.0.1 "$CC_SWITCH_PORT" 2>/dev/null || curl -s --connect-timeout 1 "http://127.0.0.1:$CC_SWITCH_PORT" >/dev/null 2>&1; then
             CC_SWITCH_RUNNING=1; break
         fi
         sleep 0.5
