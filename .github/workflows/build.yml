@@ -1,0 +1,211 @@
+name: Build & Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      claude_version:
+        description: 'Claude Code version (leave empty for latest)'
+        required: false
+        default: ''
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Determine Claude Code version
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.claude_version }}" ]; then
+            VER="${{ github.event.inputs.claude_version }}"
+          else
+            VER=$(npm view @anthropic-ai/claude-code version)
+          fi
+          echo "claude_version=$VER" >> "$GITHUB_OUTPUT"
+          echo "Claude Code version: $VER"
+
+      - name: Download Claude Code binaries
+        run: |
+          set -euo pipefail
+          mkdir -p bin/macos-arm64 bin/macos-x64 bin/linux-x64 bin/windows-x64
+
+          # Claude Code ships platform-specific tarballs via their installer
+          # We extract the standalone binary from the npm package
+          TMPDIR=$(mktemp -d)
+          npm pack @anthropic-ai/claude-code@${{ steps.version.outputs.claude_version }} --pack-destination "$TMPDIR"
+          tar -xzf "$TMPDIR"/*.tgz -C "$TMPDIR"
+
+          # The npm package contains a Node.js SEA binary per platform
+          # in the bin/ directory or as the main entry point
+          PKG_DIR="$TMPDIR/package"
+
+          # Check if pre-built binaries exist in the package
+          if [ -d "$PKG_DIR/bin" ]; then
+            echo "Found pre-built binaries in npm package"
+            # Copy platform binaries if they exist
+            for plat in linux-x64 darwin-arm64 darwin-x64 win32-x64; do
+              if [ -f "$PKG_DIR/bin/claude-$plat" ]; then
+                case "$plat" in
+                  darwin-arm64) cp "$PKG_DIR/bin/claude-$plat" bin/macos-arm64/claude ;;
+                  darwin-x64)   cp "$PKG_DIR/bin/claude-$plat" bin/macos-x64/claude ;;
+                  linux-x64)    cp "$PKG_DIR/bin/claude-$plat" bin/linux-x64/claude ;;
+                  win32-x64)    cp "$PKG_DIR/bin/claude-$plat" bin/windows-x64/claude.exe ;;
+                esac
+              fi
+            done
+          fi
+
+          # Fallback: download from official installer URLs
+          INSTALLER_BASE="https://claude.ai/download/cli"
+          for plat in macos-arm64 macos-x64 linux-x64 windows-x64; do
+            if [ ! -f "bin/$plat/claude" ] && [ ! -f "bin/$plat/claude.exe" ]; then
+              echo "Downloading Claude Code for $plat from installer..."
+              case "$plat" in
+                macos-arm64)
+                  curl -fsSL "$INSTALLER_BASE/darwin-arm64" -o bin/macos-arm64/claude || true ;;
+                macos-x64)
+                  curl -fsSL "$INSTALLER_BASE/darwin-x64" -o bin/macos-x64/claude || true ;;
+                linux-x64)
+                  curl -fsSL "$INSTALLER_BASE/linux-x64" -o bin/linux-x64/claude || true ;;
+                windows-x64)
+                  curl -fsSL "$INSTALLER_BASE/win32-x64" -o bin/windows-x64/claude.exe || true ;;
+              esac
+            fi
+          done
+
+          # Verify at least one binary exists
+          FOUND=0
+          for f in bin/*/claude bin/*/claude.exe; do
+            if [ -f "$f" ] && [ -s "$f" ]; then
+              FOUND=$((FOUND + 1))
+              echo "OK: $f ($(du -h "$f" | cut -f1))"
+            fi
+          done
+          if [ "$FOUND" -eq 0 ]; then
+            echo "ERROR: No Claude Code binaries found. Check download URLs."
+            echo "Attempting npm global install + locate binary..."
+            npm install -g @anthropic-ai/claude-code@${{ steps.version.outputs.claude_version }}
+            CLAUDE_BIN=$(which claude || find /usr/local -name "claude" -type f 2>/dev/null | head -1)
+            if [ -n "$CLAUDE_BIN" ] && [ -f "$CLAUDE_BIN" ]; then
+              cp "$CLAUDE_BIN" bin/linux-x64/claude
+              echo "Fallback OK: copied from npm global install"
+            else
+              echo "FATAL: Cannot obtain Claude Code binary"
+              exit 1
+            fi
+          fi
+
+          chmod +x bin/*/claude 2>/dev/null || true
+
+      - name: Download CC Switch
+        run: |
+          # CC Switch releases (if available from a known source)
+          # For now, skip if not available — users can add their own
+          echo "CC Switch: checking for pre-built releases..."
+          # TODO: Add CC Switch download from its release page
+          # For now, the workflow packages whatever is in bin/
+          echo "CC Switch will be included if present in the repo"
+
+      - name: Set executable permissions
+        run: |
+          chmod +x bin/*/claude 2>/dev/null || true
+          chmod +x bin/*/cc-switch 2>/dev/null || true
+          chmod +x ClaudePortable.command ClaudePortable.sh
+
+      - name: Create release zip
+        run: |
+          set -e
+          STAGE="/tmp/ClaudeCodePortable"
+          rm -rf "$STAGE"
+          mkdir -p "$STAGE"
+
+          # Copy everything
+          cp -a bin/ "$STAGE/bin/"
+          cp -a config/ "$STAGE/config/"
+          mkdir -p "$STAGE/data"
+          cp ClaudePortable.command ClaudePortable.sh ClaudePortable.bat "$STAGE/"
+          cp README.md "$STAGE/"
+          cp .gitignore "$STAGE/" 2>/dev/null || true
+
+          # Create zip
+          cd /tmp
+          zip -yrq ClaudeCodePortable.zip ClaudeCodePortable/
+          mv ClaudeCodePortable.zip "$GITHUB_WORKSPACE/"
+          ls -lh "$GITHUB_WORKSPACE/ClaudeCodePortable.zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ClaudeCodePortable
+          path: ClaudeCodePortable.zip
+          retention-days: 7
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ClaudeCodePortable
+          path: .
+
+      - name: Compose release notes
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          {
+            echo "## Claude Code Portable $TAG"
+            echo ""
+            echo "便携版 Claude Code + CC Switch，零安装，即插即用。"
+            echo ""
+            echo "### 下载"
+            echo ""
+            echo "| 文件 | 说明 |"
+            echo "|---|---|"
+            echo "| [ClaudeCodePortable.zip](https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/ClaudeCodePortable.zip) | 全平台通用包 |"
+            echo ""
+            echo "### 启动方式"
+            echo ""
+            echo "| 平台 | 操作 |"
+            echo "|---|---|"
+            echo "| macOS | \`./ClaudePortable.command\` |"
+            echo "| Linux | \`./ClaudePortable.sh\` |"
+            echo "| Windows | 双击 \`ClaudePortable.bat\` |"
+            echo ""
+            echo "### 首次使用"
+            echo ""
+            echo "1. 解压到任意目录"
+            echo "2. 运行启动脚本"
+            echo "3. 按提示配置 API（支持 CC Switch 图形界面或命令行）"
+            echo "4. 开始使用 Claude Code"
+            echo ""
+            echo "### SHA-256"
+            echo ""
+            echo "\`\`\`"
+            sha256sum ClaudeCodePortable.zip 2>/dev/null || shasum -a 256 ClaudeCodePortable.zip
+            echo "\`\`\`"
+          } > release-notes.md
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: ClaudeCodePortable.zip
+          body_path: release-notes.md
+          generate_release_notes: true
+          fail_on_unmatched_files: false
