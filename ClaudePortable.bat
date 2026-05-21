@@ -41,14 +41,23 @@ echo   架构: Windows x64
 echo   路径: %BIN_DIR%
 echo.
 
-:: 启动 CC Switch 后台代理（如果存在）
+:: 启动 CC Switch（GUI 应用，自动开启代理）
 set "HAS_CCSWITCH=0"
 if exist "%BIN_DIR%\cc-switch.exe" (
-    echo   启动 CC Switch 代理 (端口 %CC_SWITCH_PORT%)...
-    start /b "" "%BIN_DIR%\cc-switch.exe" --proxy-only --port %CC_SWITCH_PORT%
-    timeout /t 2 >nul
+    echo   启动 CC Switch...
+    start "" "%BIN_DIR%\cc-switch.exe"
+    :: 等待代理端口就绪（最多 10 秒）
+    set "WAIT=0"
+    :waitloop
+    if %WAIT% GEQ 20 goto :nowait
+    timeout /t 1 >nul
+    set /a WAIT+=2
+    curl -s "http://127.0.0.1:%CC_SWITCH_PORT%" >nul 2>&1 && goto :proxyon
+    goto :waitloop
+    :proxyon
     set "HAS_CCSWITCH=1"
-    echo   [ok] CC Switch 代理已启动
+    echo   [ok] CC Switch 代理已就绪
+    :nowait
 ) else (
     echo   [!] CC Switch 未找到，使用直连模式
 )

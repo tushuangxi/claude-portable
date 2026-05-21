@@ -98,39 +98,57 @@ with open(os.environ.get('CONFIG_FILE', '$CONFIG_FILE'), 'w') as f:
 fi
 
 # ═══════════════════════════════════════════
-# 加载配置
+# 启动 CC Switch 代理
 # ═══════════════════════════════════════════
 CC_SWITCH_PORT="${CC_SWITCH_PORT:-18080}"
+CC_SWITCH_RUNNING=0
 
-# 尝试启动 CC Switch 代理
 if [ -f "$BIN_DIR/cc-switch" ]; then
-    "$BIN_DIR/cc-switch" --proxy-only --port "$CC_SWITCH_PORT" &>/dev/null &
+    echo "  启动 CC Switch..."
+    # CC Switch 是 GUI 应用，启动后自动开启本地代理
+    open "$BIN_DIR/cc-switch" 2>/dev/null || "$BIN_DIR/cc-switch" &>/dev/null &
     CC_SWITCH_PID=$!
-    sleep 3
 
-    if kill -0 "$CC_SWITCH_PID" 2>/dev/null; then
+    # 等待代理端口就绪（最多 10 秒）
+    for i in $(seq 1 20); do
+        if curl -s "http://127.0.0.1:$CC_SWITCH_PORT" >/dev/null 2>&1; then
+            CC_SWITCH_RUNNING=1
+            break
+        fi
+        sleep 0.5
+    done
+
+    if [ "$CC_SWITCH_RUNNING" -eq 1 ]; then
         export ANTHROPIC_BASE_URL="http://127.0.0.1:$CC_SWITCH_PORT"
         export ANTHROPIC_API_KEY="portable-key"
         PROXY_MODE="CC Switch 代理 (端口 $CC_SWITCH_PORT)"
     else
+        echo "  [!] CC Switch 代理未就绪，尝试直连模式"
         PROXY_MODE="直连"
     fi
 else
-    PROXY_MODE="直连（无 CC Switch）"
+    PROXY_MODE="直连（未找到 CC Switch）"
 fi
 
 # 直连模式：从配置文件读取
-if [ -z "$ANTHROPIC_BASE_URL" ] && [ -f "$CONFIG_FILE" ]; then
+if [ "$CC_SWITCH_RUNNING" -eq 0 ] && [ -f "$CONFIG_FILE" ]; then
     eval "$(python3 -c "
-import json
-with open('$CONFIG_FILE') as f:
-    d = json.load(f)
-providers = d.get('providers', [])
-if providers:
-    p = providers[0]
-    print(f'export ANTHROPIC_BASE_URL=\"{p[\"base_url\"]}\"')
-    print(f'export ANTHROPIC_API_KEY=\"{p[\"api_key\"]}\"')
-" 2>/dev/null)"
+import json, os
+try:
+    with open(os.environ.get('CONFIG_FILE', '$CONFIG_FILE')) as f:
+        d = json.load(f)
+    providers = d.get('providers', [])
+    active = d.get('active_provider')
+    p = None
+    if active:
+        p = next((x for x in providers if x.get('id') == active), None)
+    if not p and providers:
+        p = providers[0]
+    if p:
+        print(f'export ANTHROPIC_BASE_URL=\"{p[\"base_url\"]}\"')
+        print(f'export ANTHROPIC_API_KEY=\"{p[\"api_key\"]}\"')
+except: pass
+" 2>/dev/null)" || true
 fi
 
 # 检查是否有配置

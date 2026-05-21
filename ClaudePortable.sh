@@ -54,22 +54,38 @@ with open(os.environ['CONFIG_FILE'], 'w') as f: json.dump(config, f, indent=2, e
 fi
 
 CC_SWITCH_PORT="${CC_SWITCH_PORT:-18080}"
+CC_SWITCH_RUNNING=0
 
-if [ -f "$BIN_DIR/cc-switch" ] && [ "${BIN_DIR##*.}" != "AppImage" ]; then
-    "$BIN_DIR/cc-switch" --proxy-only --port "$CC_SWITCH_PORT" &>/dev/null &
+if [ -f "$BIN_DIR/cc-switch" ]; then
+    echo "  启动 CC Switch..."
+    "$BIN_DIR/cc-switch" &>/dev/null &
     CC_SWITCH_PID=$!
-    sleep 3
-    if kill -0 "$CC_SWITCH_PID" 2>/dev/null; then
+    for i in $(seq 1 20); do
+        if curl -s "http://127.0.0.1:$CC_SWITCH_PORT" >/dev/null 2>&1; then
+            CC_SWITCH_RUNNING=1; break
+        fi
+        sleep 0.5
+    done
+    if [ "$CC_SWITCH_RUNNING" -eq 1 ]; then
         export ANTHROPIC_BASE_URL="http://127.0.0.1:$CC_SWITCH_PORT"
         export ANTHROPIC_API_KEY="portable-key"
+    else
+        echo "  [!] CC Switch 代理未就绪，使用直连"
     fi
 fi
 
-if [ -z "$ANTHROPIC_API_KEY" ] && [ -f "$CONFIG_FILE" ]; then
-    eval "$(python3 -c "
-import json; d=json.load(open('$CONFIG_FILE')); p=d['providers'][0] if d.get('providers') else None
-if p: print(f'export ANTHROPIC_BASE_URL=\"{p[\"base_url\"]}\"\nexport ANTHROPIC_API_KEY=\"{p[\"api_key\"]}\"')
-" 2>/dev/null)"
+if [ "$CC_SWITCH_RUNNING" -eq 0 ] && [ -f "$CONFIG_FILE" ]; then
+    eval "$(API_BASE="" API_KEY="" CONFIG_FILE="$CONFIG_FILE" python3 -c "
+import json, os
+try:
+    with open(os.environ['CONFIG_FILE']) as f:
+        d = json.load(f)
+    p = d.get('providers', [None])[0]
+    if p:
+        print(f'export ANTHROPIC_BASE_URL=\"{p[\"base_url\"]}\"')
+        print(f'export ANTHROPIC_API_KEY=\"{p[\"api_key\"]}\"')
+except: pass
+" 2>/dev/null)" || true
 fi
 
 if [ -z "$ANTHROPIC_API_KEY" ]; then
