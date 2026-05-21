@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": ["Read", "Edit", "Write", "Bash"],
+    "ask": [],
+    "deny": []
+  },
+  "model": "mimo-v2.5-pro",
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:18080",
+    "ANTHROPIC_API_KEY": "portable-key"
+  }
+}

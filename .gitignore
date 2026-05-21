@@ -1,0 +1,14 @@
+# Platform binaries — too large for git (1.1GB total)
+# Distributed via GitHub Releases instead
+bin/
+
+# macOS
+.DS_Store
+
+# Session data (user-specific)
+data/.claude/
+data/**/*.jsonl
+
+# Temp
+*.tmp
+*.swp
