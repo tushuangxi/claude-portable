@@ -46,73 +46,75 @@ jobs:
           set -euo pipefail
           mkdir -p bin/macos-arm64 bin/macos-x64 bin/linux-x64 bin/windows-x64
 
-          # Claude Code ships platform-specific tarballs via their installer
-          # We extract the standalone binary from the npm package
-          TMPDIR=$(mktemp -d)
-          npm pack @anthropic-ai/claude-code@${{ steps.version.outputs.claude_version }} --pack-destination "$TMPDIR"
-          tar -xzf "$TMPDIR"/*.tgz -C "$TMPDIR"
+          VER="${{ steps.version.outputs.claude_version }}"
+          BASE="https://downloads.claude.ai/claude-code-releases"
 
-          # The npm package contains a Node.js SEA binary per platform
-          # in the bin/ directory or as the main entry point
-          PKG_DIR="$TMPDIR/package"
+          # Download platform binaries from official CDN
+          echo "Downloading Claude Code v$VER binaries..."
 
-          # Check if pre-built binaries exist in the package
-          if [ -d "$PKG_DIR/bin" ]; then
-            echo "Found pre-built binaries in npm package"
-            # Copy platform binaries if they exist
-            for plat in linux-x64 darwin-arm64 darwin-x64 win32-x64; do
-              if [ -f "$PKG_DIR/bin/claude-$plat" ]; then
-                case "$plat" in
-                  darwin-arm64) cp "$PKG_DIR/bin/claude-$plat" bin/macos-arm64/claude ;;
-                  darwin-x64)   cp "$PKG_DIR/bin/claude-$plat" bin/macos-x64/claude ;;
-                  linux-x64)    cp "$PKG_DIR/bin/claude-$plat" bin/linux-x64/claude ;;
-                  win32-x64)    cp "$PKG_DIR/bin/claude-$plat" bin/windows-x64/claude.exe ;;
-                esac
-              fi
-            done
+          # Linux x64
+          echo "  linux-x64..."
+          curl -fsSL "$BASE/claude-code-linux-x64-v$VER.tar.gz" -o /tmp/linux.tar.gz 2>/dev/null \
+            || curl -fsSL "$BASE/linux-x64/claude" -o bin/linux-x64/claude 2>/dev/null \
+            || true
+          if [ -f /tmp/linux.tar.gz ]; then
+            tar -xzf /tmp/linux.tar.gz -C bin/linux-x64/ 2>/dev/null || true
           fi
 
-          # Fallback: download from official installer URLs
-          INSTALLER_BASE="https://claude.ai/download/cli"
-          for plat in macos-arm64 macos-x64 linux-x64 windows-x64; do
-            if [ ! -f "bin/$plat/claude" ] && [ ! -f "bin/$plat/claude.exe" ]; then
-              echo "Downloading Claude Code for $plat from installer..."
-              case "$plat" in
-                macos-arm64)
-                  curl -fsSL "$INSTALLER_BASE/darwin-arm64" -o bin/macos-arm64/claude || true ;;
-                macos-x64)
-                  curl -fsSL "$INSTALLER_BASE/darwin-x64" -o bin/macos-x64/claude || true ;;
-                linux-x64)
-                  curl -fsSL "$INSTALLER_BASE/linux-x64" -o bin/linux-x64/claude || true ;;
-                windows-x64)
-                  curl -fsSL "$INSTALLER_BASE/win32-x64" -o bin/windows-x64/claude.exe || true ;;
-              esac
-            fi
-          done
+          # macOS arm64
+          echo "  macos-arm64..."
+          curl -fsSL "$BASE/claude-code-darwin-arm64-v$VER.tar.gz" -o /tmp/mac-arm.tar.gz 2>/dev/null \
+            || curl -fsSL "$BASE/darwin-arm64/claude" -o bin/macos-arm64/claude 2>/dev/null \
+            || true
+          if [ -f /tmp/mac-arm.tar.gz ]; then
+            tar -xzf /tmp/mac-arm.tar.gz -C bin/macos-arm64/ 2>/dev/null || true
+          fi
 
-          # Verify at least one binary exists
+          # macOS x64
+          echo "  macos-x64..."
+          curl -fsSL "$BASE/claude-code-darwin-x64-v$VER.tar.gz" -o /tmp/mac-x64.tar.gz 2>/dev/null \
+            || curl -fsSL "$BASE/darwin-x64/claude" -o bin/macos-x64/claude 2>/dev/null \
+            || true
+          if [ -f /tmp/mac-x64.tar.gz ]; then
+            tar -xzf /tmp/mac-x64.tar.gz -C bin/macos-x64/ 2>/dev/null || true
+          fi
+
+          # Windows x64
+          echo "  windows-x64..."
+          curl -fsSL "$BASE/claude-code-win32-x64-v$VER.tar.gz" -o /tmp/win.tar.gz 2>/dev/null \
+            || curl -fsSL "$BASE/win32-x64/claude.exe" -o bin/windows-x64/claude.exe 2>/dev/null \
+            || true
+          if [ -f /tmp/win.tar.gz ]; then
+            tar -xzf /tmp/win.tar.gz -C bin/windows-x64/ 2>/dev/null || true
+          fi
+
+          # Fallback: use the native installer script to get linux binary
           FOUND=0
           for f in bin/*/claude bin/*/claude.exe; do
             if [ -f "$f" ] && [ -s "$f" ]; then
               FOUND=$((FOUND + 1))
-              echo "OK: $f ($(du -h "$f" | cut -f1))"
+              echo "  OK: $f ($(du -h "$f" | cut -f1))"
             fi
           done
+
           if [ "$FOUND" -eq 0 ]; then
-            echo "ERROR: No Claude Code binaries found. Check download URLs."
-            echo "Attempting npm global install + locate binary..."
-            npm install -g @anthropic-ai/claude-code@${{ steps.version.outputs.claude_version }}
-            CLAUDE_BIN=$(which claude || find /usr/local -name "claude" -type f 2>/dev/null | head -1)
-            if [ -n "$CLAUDE_BIN" ] && [ -f "$CLAUDE_BIN" ]; then
+            echo "CDN download failed. Trying native installer..."
+            curl -fsSL https://claude.ai/install.sh | bash -s -- --yes 2>/dev/null || true
+            CLAUDE_BIN="$HOME/.local/bin/claude"
+            if [ -f "$CLAUDE_BIN" ]; then
               cp "$CLAUDE_BIN" bin/linux-x64/claude
-              echo "Fallback OK: copied from npm global install"
-            else
-              echo "FATAL: Cannot obtain Claude Code binary"
-              exit 1
+              echo "  Fallback OK: linux-x64 from native installer"
+              FOUND=1
             fi
           fi
 
+          if [ "$FOUND" -eq 0 ]; then
+            echo "FATAL: Cannot obtain any Claude Code binary"
+            exit 1
+          fi
+
           chmod +x bin/*/claude 2>/dev/null || true
+          echo "Done. $FOUND platform(s) ready."
 
       - name: Download CC Switch
         run: |
