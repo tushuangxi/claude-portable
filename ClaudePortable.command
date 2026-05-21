@@ -13,13 +13,13 @@ if [ "$ARCH" = "arm64" ]; then
 elif [ "$ARCH" = "x86_64" ]; then
     BIN_DIR="$SCRIPT_DIR/bin/macos-x64"
 else
-    echo "❌ 不支持的架构: $ARCH"
+    echo "[ERROR] 不支持的架构: $ARCH"
     exit 1
 fi
 
 # 检查二进制
 if [ ! -f "$BIN_DIR/claude" ]; then
-    echo "❌ 未找到 Claude Code: $BIN_DIR/claude"
+    echo "[ERROR] 未找到 Claude Code: $BIN_DIR/claude"
     echo "请确认 bin/ 目录完整"
     exit 1
 fi
@@ -67,33 +67,33 @@ if [ ! -f "$FIRST_RUN_FLAG" ]; then
     read -p "  API Key: " api_key
 
     if [ -z "$api_base" ] || [ -z "$api_key" ]; then
-        echo "❌ API 地址和 Key 不能为空"
+        echo "[ERROR] API 地址和 Key 不能为空"
         exit 1
     fi
 
     # 保存配置
-    python3 -c "
-import json
+    API_BASE="$api_base" API_KEY="$api_key" python3 -c "
+import json, os
 config = {
     'providers': [{
         'id': 'custom',
-        'name': '自定义 API',
+        'name': 'Custom API',
         'type': 'anthropic',
-        'base_url': '$api_base',
-        'api_key': '$api_key',
+        'base_url': os.environ['API_BASE'],
+        'api_key': os.environ['API_KEY'],
         'enabled': True
     }],
     'active_provider': 'custom',
     'proxy_port': 18080,
     'auto_start_proxy': True
 }
-with open('$CONFIG_FILE', 'w') as f:
+with open(os.environ.get('CONFIG_FILE', '$CONFIG_FILE'), 'w') as f:
     json.dump(config, f, indent=2, ensure_ascii=False)
 " 2>/dev/null
 
     touch "$FIRST_RUN_FLAG"
     echo ""
-    echo "  ✓ 配置已保存"
+    echo "  [ok] 配置已保存"
     echo ""
 fi
 
@@ -136,7 +136,7 @@ fi
 # 检查是否有配置
 if [ -z "$ANTHROPIC_API_KEY" ]; then
     echo ""
-    echo "❌ 未配置 API，请先运行配置："
+    echo "[ERROR] 未配置 API，请先运行配置："
     echo "   $0 --setup"
     echo ""
     echo "或打开 CC Switch 手动配置："

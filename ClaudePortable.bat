@@ -12,13 +12,7 @@ set "CC_SWITCH_PORT=18080"
 
 :: 检查二进制文件
 if not exist "%BIN_DIR%\claude.exe" (
-    echo ❌ 未找到 Claude Code: %BIN_DIR%\claude.exe
-    pause
-    exit /b 1
-)
-
-if not exist "%BIN_DIR%\cc-switch.exe" (
-    echo ❌ 未找到 CC Switch: %BIN_DIR%\cc-switch.exe
+    echo [ERROR] 未找到 Claude Code: %BIN_DIR%\claude.exe
     pause
     exit /b 1
 )
@@ -47,21 +41,29 @@ echo   架构: Windows x64
 echo   路径: %BIN_DIR%
 echo.
 
-:: 启动 CC Switch 后台代理
-echo 🚀 启动 CC Switch 代理 (端口 %CC_SWITCH_PORT%)...
-start /b "" "%BIN_DIR%\cc-switch.exe" --proxy-only --port %CC_SWITCH_PORT%
-timeout /t 2 >nul
+:: 启动 CC Switch 后台代理（如果存在）
+set "HAS_CCSWITCH=0"
+if exist "%BIN_DIR%\cc-switch.exe" (
+    echo   启动 CC Switch 代理 (端口 %CC_SWITCH_PORT%)...
+    start /b "" "%BIN_DIR%\cc-switch.exe" --proxy-only --port %CC_SWITCH_PORT%
+    timeout /t 2 >nul
+    set "HAS_CCSWITCH=1"
+    echo   [ok] CC Switch 代理已启动
+) else (
+    echo   [!] CC Switch 未找到，使用直连模式
+)
 
 :: 设置环境变量
-set "ANTHROPIC_BASE_URL=http://127.0.0.1:%CC_SWITCH_PORT%"
-set "ANTHROPIC_API_KEY=portable-key"
+if "%HAS_CCSWITCH%"=="1" (
+    set "ANTHROPIC_BASE_URL=http://127.0.0.1:%CC_SWITCH_PORT%"
+    set "ANTHROPIC_API_KEY=portable-key"
+)
 
-echo   ✓ CC Switch 代理已启动
 echo.
-echo 📌 可用命令:
-echo   claude              — 交互模式
-echo   claude -p "任务"     — 一次性任务
-echo   claude -c           — 继续上次对话
+echo   可用命令:
+echo   claude              -- 交互模式
+echo   claude -p "任务"     -- 一次性任务
+echo   claude -c           -- 继续上次对话
 echo.
 echo ═══════════════════════════════════════════
 echo.
@@ -75,7 +77,7 @@ if "%~1"=="" (
 
 :: 清理
 echo.
-echo 🛑 正在停止 CC Switch...
+echo   正在停止 CC Switch...
 taskkill /f /im cc-switch.exe >nul 2>&1
-echo 👋 已退出
+echo   已退出
 pause
