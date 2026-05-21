@@ -50,17 +50,26 @@ if "!HAS_CCSWITCH!"=="1" (
     set "ANTHROPIC_API_KEY=portable-key"
     echo   [ok] CC Switch proxy ready
 ) else (
-    echo   Direct mode - checking config...
-    if not defined ANTHROPIC_API_KEY (
-        if not defined ANTHROPIC_BASE_URL (
-            echo.
-            echo   [!] No API configured.
-            echo   Please add CC Switch to bin\windows-x64\
-            echo   or set ANTHROPIC_API_KEY environment variable.
-            echo.
-            pause
-            exit /b 1
+    :: 尝试从 providers.json 读取配置
+    if exist "%CONFIG_FILE%" (
+        for /f "usebackq delims=" %%A in (`powershell -NoProfile -Command "try { $d = Get-Content '%CONFIG_FILE%' | ConvertFrom-Json; $p = $d.providers[0]; if ($p) { Write-Output $p.base_url; Write-Output $p.api_key } } catch {}"`) do (
+            if not defined ANTHROPIC_BASE_URL (
+                set "ANTHROPIC_BASE_URL=%%A"
+            ) else if not defined ANTHROPIC_API_KEY (
+                set "ANTHROPIC_API_KEY=%%A"
+            )
         )
+    )
+    if defined ANTHROPIC_API_KEY (
+        echo   [ok] Direct mode - config loaded
+    ) else (
+        echo.
+        echo   [!] No API configured.
+        echo   Please add CC Switch to bin\windows-x64\
+        echo   or set ANTHROPIC_API_KEY environment variable.
+        echo.
+        pause
+        exit /b 1
     )
 )
 

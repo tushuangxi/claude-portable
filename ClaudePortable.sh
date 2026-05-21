@@ -23,7 +23,8 @@ fi
 
 chmod +x "$BIN_DIR/claude" "$BIN_DIR/cc-switch" 2>/dev/null
 
-CLAUDE_CONFIG_DIR="$SCRIPT_DIR/data/.claude"
+export CLAUDE_CONFIG_DIR="$SCRIPT_DIR/data/.claude"
+export CLAUDE_HOME="$SCRIPT_DIR/data/.claude"
 mkdir -p "$CLAUDE_CONFIG_DIR" "$SCRIPT_DIR/data"
 
 CONFIG_FILE="$SCRIPT_DIR/config/ccswitch/providers.json"

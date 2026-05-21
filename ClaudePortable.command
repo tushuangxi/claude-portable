@@ -27,8 +27,9 @@ fi
 chmod +x "$BIN_DIR/claude" 2>/dev/null
 chmod +x "$BIN_DIR/cc-switch" 2>/dev/null
 
-# 配置目录
-CLAUDE_CONFIG_DIR="$SCRIPT_DIR/data/.claude"
+# 配置目录 — 导出给 Claude Code 使用便携路径
+export CLAUDE_CONFIG_DIR="$SCRIPT_DIR/data/.claude"
+export CLAUDE_HOME="$SCRIPT_DIR/data/.claude"
 mkdir -p "$CLAUDE_CONFIG_DIR" "$SCRIPT_DIR/data"
 
 # ═══════════════════════════════════════════
@@ -54,9 +55,14 @@ if [ ! -f "$FIRST_RUN_FLAG" ]; then
     if [ "$choice" = "1" ]; then
         echo ""
         echo "  正在打开 CC Switch..."
-        echo "  请在 CC Switch 中添加 Provider，然后重新运行此脚本。"
+        echo "  请在 CC Switch 中添加 Provider，保存后关闭 CC Switch。"
+        echo "  然后重新运行此脚本。"
         echo ""
-        open "$BIN_DIR/cc-switch" 2>/dev/null || "$BIN_DIR/cc-switch" &
+        "$BIN_DIR/cc-switch" 2>/dev/null || true
+        # 检查用户是否配置了 provider
+        if python3 -c "import json; d=json.load(open('$CONFIG_FILE')); exit(0 if d.get('providers') else 1)" 2>/dev/null; then
+            touch "$FIRST_RUN_FLAG"
+        fi
         exit 0
     fi
 
@@ -111,7 +117,7 @@ if [ -f "$BIN_DIR/cc-switch" ]; then
 
     # 等待代理端口就绪（最多 10 秒）
     for i in $(seq 1 20); do
-        if nc -z 127.0.0.1 "$CC_SWITCH_PORT" 2>/dev/null; then
+        if nc -z -w1 127.0.0.1 "$CC_SWITCH_PORT" 2>/dev/null; then
             CC_SWITCH_RUNNING=1
             break
         fi
