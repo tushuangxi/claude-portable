@@ -161,6 +161,7 @@ jobs:
           cp -a config/ "$STAGE/config/"
           mkdir -p "$STAGE/data"
           cp ClaudePortable.command ClaudePortable.sh ClaudePortable.bat "$STAGE/"
+          cp ClaudePortable使用说明.html "$STAGE/" 2>/dev/null || true
           cp README.md "$STAGE/"
           cp .gitignore "$STAGE/" 2>/dev/null || true
 
