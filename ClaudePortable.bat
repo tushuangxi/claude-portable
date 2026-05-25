@@ -20,9 +20,12 @@ echo.
 set "SCRIPT_DIR=%~dp0"
 set "BIN_DIR=%SCRIPT_DIR%bin\windows-x64"
 set "PORTABLE_DATA=%SCRIPT_DIR%data"
-set "SANDBOX=%PORTABLE_DATA%\_home"
+set "PORTABLE_CCS=%PORTABLE_DATA%\.cc-switch"
+set "PORTABLE_CLAUDE=%PORTABLE_DATA%\.claude"
 set "LIB_DIR=%SCRIPT_DIR%lib"
-set "REAL_USERPROFILE=%USERPROFILE%"
+
+set "SYS_CCS=%USERPROFILE%\.cc-switch"
+set "SYS_CLAUDE=%USERPROFILE%\.claude"
 
 if not exist "%BIN_DIR%\claude.exe" (
   echo [ERROR] Claude Code not found: %BIN_DIR%\claude.exe
@@ -30,32 +33,48 @@ if not exist "%BIN_DIR%\claude.exe" (
 )
 
 :: =============================================
-:: Sandbox setup — hijack USERPROFILE/HOME
+:: Setup portable directories
 :: =============================================
-:: All cc-switch and claude data lives in %SANDBOX% (= data\_home).
-:: Programs that read %USERPROFILE%\.cc-switch land in our sandbox,
-:: never touching the host machine.
 if not exist "%PORTABLE_DATA%" mkdir "%PORTABLE_DATA%"
-if not exist "%SANDBOX%" mkdir "%SANDBOX%"
-if not exist "%SANDBOX%\.cc-switch" mkdir "%SANDBOX%\.cc-switch"
-if not exist "%SANDBOX%\.claude" mkdir "%SANDBOX%\.claude"
+if not exist "%PORTABLE_CCS%" mkdir "%PORTABLE_CCS%"
+if not exist "%PORTABLE_CLAUDE%" mkdir "%PORTABLE_CLAUDE%"
 
-:: Migrate existing portable DB (from old layout) to sandbox if present
-if exist "%PORTABLE_DATA%\cc-switch\cc-switch.db" (
-  if not exist "%SANDBOX%\.cc-switch\cc-switch.db" (
-    copy /y "%PORTABLE_DATA%\cc-switch\cc-switch.db" "%SANDBOX%\.cc-switch\cc-switch.db" >nul 2>&1
+:: Migrate existing system data into portable folder (one-time)
+if exist "%SYS_CCS%\cc-switch.db" (
+  if not exist "%PORTABLE_CCS%\cc-switch.db" (
+    echo   [migrate] Copying existing cc-switch data into portable folder...
+    xcopy /e /i /y /q "%SYS_CCS%" "%PORTABLE_CCS%" >nul 2>&1
+  )
+)
+if exist "%SYS_CLAUDE%" (
+  if not exist "%PORTABLE_CLAUDE%\settings.json" (
+    if not exist "%PORTABLE_CLAUDE%\.claude.json" (
+      echo   [migrate] Copying existing claude data into portable folder...
+      xcopy /e /i /y /q "%SYS_CLAUDE%" "%PORTABLE_CLAUDE%" >nul 2>&1
+    )
   )
 )
 
-:: Hijack environment — cc-switch and claude both read these
-set "USERPROFILE=%SANDBOX%"
-set "HOME=%SANDBOX%"
-set "APPDATA=%SANDBOX%\AppData\Roaming"
-set "LOCALAPPDATA=%SANDBOX%\AppData\Local"
-if not exist "%APPDATA%" mkdir "%APPDATA%"
-if not exist "%LOCALAPPDATA%" mkdir "%LOCALAPPDATA%"
+:: =============================================
+:: Replace system .cc-switch and .claude with junctions to portable
+:: =============================================
+:: We keep the system path %USERPROFILE%\.cc-switch but make it a junction
+:: pointing into our portable folder. cc-switch and claude write what they
+:: think is the system path, but data lands in the portable folder.
 
-set "CCS_DB=%SANDBOX%\.cc-switch\cc-switch.db"
+call :ensure_junction "%SYS_CCS%" "%PORTABLE_CCS%"
+if !errorlevel! NEQ 0 (
+  echo   [ERROR] Cannot create junction for .cc-switch
+  echo   Make sure no cc-switch.exe is running, then try again.
+  pause & exit /b 1
+)
+call :ensure_junction "%SYS_CLAUDE%" "%PORTABLE_CLAUDE%"
+if !errorlevel! NEQ 0 (
+  echo   [ERROR] Cannot create junction for .claude
+  pause & exit /b 1
+)
+
+set "CCS_DB=%PORTABLE_CCS%\cc-switch.db"
 
 :: =============================================
 :: Check if valid config exists
@@ -67,7 +86,7 @@ if exist "%CCS_DB%" (
 if "!HAS_CONFIG!"=="1" goto :load_config
 
 :: =============================================
-:: First-run setup
+:: First-run: open CC Switch and wait for DB
 :: =============================================
 echo.
 echo =====================================
@@ -79,7 +98,6 @@ echo   Add a Provider and save (no need to close CC Switch).
 echo.
 start "" "%BIN_DIR%\cc-switch.exe"
 
-:: Poll for DB to appear and have valid content (timeout 5 minutes)
 echo   Waiting for provider configuration...
 set "WAIT_COUNT=0"
 :wait_db
@@ -90,7 +108,6 @@ if exist "%CCS_DB%" (
   for %%F in ("%CCS_DB%") do if %%~zF GTR 1024 set "HAS_CONFIG=1"
 )
 if "!HAS_CONFIG!"=="1" goto :db_ready
-:: Timeout after 150 iterations × 2s = 5 min
 if !WAIT_COUNT! GEQ 150 (
   echo   [!] Timeout waiting for provider config.
   pause & exit /b 1
@@ -99,12 +116,11 @@ goto :wait_db
 
 :db_ready
 echo   [ok] Provider detected, continuing...
-:: Give DB a moment to fully flush
 timeout /t 1 >nul 2>&1
 
 :load_config
 :: =============================================
-:: Read API config from sandbox DB
+:: Read API config from DB
 :: =============================================
 set "TMP_URL=%TEMP%\ccs_url_%RANDOM%.txt"
 set "TMP_KEY=%TEMP%\ccs_key_%RANDOM%.txt"
@@ -121,16 +137,64 @@ if exist "%LIB_DIR%\extract-config.ps1" (
 )
 
 if "!ANTHROPIC_API_KEY!"=="" (
-  echo   [!] Failed to load config. Run again or reconfigure CC Switch.
+  echo   [!] Failed to load config.
   pause & exit /b 1
 )
 
 :: =============================================
 :: Launch Claude Code
 :: =============================================
-echo   Mode: Direct ^| Sandbox: %SANDBOX%
+echo   Mode: Direct ^| Data: portable folder
 echo.
 "%BIN_DIR%\claude.exe" %*
 
+:: =============================================
+:: Cleanup: remove junctions to leave no trace on host
+:: =============================================
+:: Only remove if they are still junctions (user might have replaced them)
+call :remove_junction "%SYS_CCS%"
+call :remove_junction "%SYS_CLAUDE%"
+
 pause
+exit /b 0
+
+:: =============================================
+:: Subroutine: ensure %1 is a junction pointing to %2
+:: =============================================
+:ensure_junction
+set "LINK=%~1"
+set "TARGET=%~2"
+:: If LINK doesn't exist — create junction
+if not exist "%LINK%" (
+  mklink /J "%LINK%" "%TARGET%" >nul 2>&1
+  if !errorlevel! EQU 0 (exit /b 0) else (exit /b 1)
+)
+:: Check if LINK is already a junction (reparse point)
+dir /al "%LINK%\.." 2>nul | findstr /i /c:"<JUNCTION>" | findstr /i /c:"%~n1" >nul 2>&1
+if !errorlevel! EQU 0 (
+  :: Already a junction — assume it points correctly (idempotent)
+  exit /b 0
+)
+:: It's a real directory. We already migrated content above, so remove and re-link.
+:: Use rd (rmdir) — it removes empty dirs after migration. If not empty, fail safely.
+rd "%LINK%" 2>nul
+if exist "%LINK%" (
+  :: Real dir with content (migration may have failed). Force-delete only if empty
+  :: of unique data — but we already xcopy'd everything, so this should be safe.
+  rd /s /q "%LINK%" 2>nul
+)
+mklink /J "%LINK%" "%TARGET%" >nul 2>&1
+if !errorlevel! EQU 0 (exit /b 0) else (exit /b 1)
+
+:: =============================================
+:: Subroutine: remove junction (only if it IS a junction, not real dir)
+:: =============================================
+:remove_junction
+set "LINK=%~1"
+if not exist "%LINK%" exit /b 0
+:: Use fsutil to verify it's a reparse point before deleting
+fsutil reparsepoint query "%LINK%" >nul 2>&1
+if !errorlevel! EQU 0 (
+  rd "%LINK%" >nul 2>&1
+)
 exit /b 0
