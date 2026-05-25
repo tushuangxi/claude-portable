@@ -92,13 +92,15 @@ if exist "%SYS_CLAUDE%" (
 
 call :ensure_junction "%SYS_CCS%" "%PORTABLE_CCS%"
 if !errorlevel! NEQ 0 (
-  echo   [ERROR] Cannot create junction for .cc-switch
-  echo   Make sure no cc-switch.exe is running, then try again.
+  echo   [ERROR] Cannot create link for .cc-switch
+  echo   - Junction failed (target on different volume?)
+  echo   - Symlink failed (need admin rights or Developer Mode)
+  echo   On U盘: enable Developer Mode in Windows Settings, or run as admin.
   pause & exit /b 1
 )
 call :ensure_junction "%SYS_CLAUDE%" "%PORTABLE_CLAUDE%"
 if !errorlevel! NEQ 0 (
-  echo   [ERROR] Cannot create junction for .claude
+  echo   [ERROR] Cannot create link for .claude
   pause & exit /b 1
 )
 
@@ -135,7 +137,7 @@ call :check_config
 if "!HAS_CONFIG!"=="1" goto :db_ready
 if !WAIT_COUNT! GEQ 150 (
   echo   [!] Timeout waiting for provider config.
-  pause & exit /b 1
+  goto :error_cleanup
 )
 goto :wait_db
 
@@ -169,7 +171,7 @@ if exist "%LIB_DIR%\extract-config.ps1" (
 
 if "!ANTHROPIC_AUTH_TOKEN!"=="" (
   echo   [!] Failed to load config.
-  pause & exit /b 1
+  goto :error_cleanup
 )
 
 :: =============================================
@@ -178,10 +180,23 @@ if "!ANTHROPIC_AUTH_TOKEN!"=="" (
 echo   Mode: Direct ^| Data: portable folder
 echo.
 "%BIN_DIR%\claude.exe" %*
+goto :final_cleanup
 
+:error_cleanup
+:: Run cleanup then exit with error
+call :do_cleanup
+pause
+exit /b 1
+
+:final_cleanup
 :: =============================================
 :: Cleanup: kill cc-switch we started, then remove junctions
 :: =============================================
+call :do_cleanup
+pause
+exit /b 0
+
+:do_cleanup
 if "!WE_STARTED_CCS!"=="1" (
   taskkill /im cc-switch.exe /t >nul 2>&1
   timeout /t 2 >nul 2>&1
@@ -191,11 +206,8 @@ if "!WE_STARTED_CCS!"=="1" (
     timeout /t 1 >nul 2>&1
   )
 )
-:: Only remove if they are still junctions (user might have replaced them)
 call :remove_junction "%SYS_CCS%"
 call :remove_junction "%SYS_CLAUDE%"
-
-pause
 exit /b 0
 
 :: =============================================
@@ -220,9 +232,12 @@ exit /b 0
 :ensure_junction
 set "LINK=%~1"
 set "TARGET=%~2"
-:: If LINK doesn't exist — create junction
+:: If LINK doesn't exist — try junction first, fall back to dir symlink
 if not exist "%LINK%" (
   mklink /J "%LINK%" "%TARGET%" >nul 2>&1
+  if !errorlevel! EQU 0 (exit /b 0)
+  :: Junction failed (likely cross-volume) — try symlink
+  mklink /D "%LINK%" "%TARGET%" >nul 2>&1
   if !errorlevel! EQU 0 (exit /b 0) else (exit /b 1)
 )
 :: Check if LINK is already a reparse point (junction or symlink)
@@ -236,7 +251,10 @@ rd "%LINK%" 2>nul
 if exist "%LINK%" (
   rd /s /q "%LINK%" 2>nul
 )
+:: Try junction first, fall back to symlink
 mklink /J "%LINK%" "%TARGET%" >nul 2>&1
+if !errorlevel! EQU 0 (exit /b 0)
+mklink /D "%LINK%" "%TARGET%" >nul 2>&1
 if !errorlevel! EQU 0 (exit /b 0) else (exit /b 1)
 
 :: =============================================

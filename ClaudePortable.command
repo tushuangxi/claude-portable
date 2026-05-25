@@ -91,10 +91,10 @@ WE_STARTED_CCS=0
 
 # 退出时清理符号链接（只清符号链接，不动真目录）
 cleanup() {
-    # 优雅杀掉本脚本启动的 cc-switch（含子进程）
+    # 优雅杀掉本脚本启动的 cc-switch
     if [ "$WE_STARTED_CCS" = "1" ] && [ -n "$CC_SWITCH_PID" ] && kill -0 "$CC_SWITCH_PID" 2>/dev/null; then
-        # SIGTERM 整个进程组
-        kill -TERM "-$CC_SWITCH_PID" 2>/dev/null || kill "$CC_SWITCH_PID" 2>/dev/null
+        # 先 SIGTERM 主进程
+        kill -TERM "$CC_SWITCH_PID" 2>/dev/null
         # 等最多 5 秒让 Electron 优雅关闭
         for _ in 1 2 3 4 5; do
             kill -0 "$CC_SWITCH_PID" 2>/dev/null || break
@@ -102,10 +102,13 @@ cleanup() {
         done
         # 还活着 → SIGKILL
         if kill -0 "$CC_SWITCH_PID" 2>/dev/null; then
-            kill -9 "-$CC_SWITCH_PID" 2>/dev/null || kill -9 "$CC_SWITCH_PID" 2>/dev/null
+            kill -9 "$CC_SWITCH_PID" 2>/dev/null
         fi
-        # 兜底：用 pgrep 找剩余的 cc-switch 进程并清理
-        pkill -f "[Cc][Cc].?[Ss]witch" 2>/dev/null
+        # 清理可能残留的 Electron 子进程（仅本进程的子代）
+        # 用 pgrep -P 找直接子进程
+        for child in $(pgrep -P "$CC_SWITCH_PID" 2>/dev/null); do
+            kill -9 "$child" 2>/dev/null
+        done
     fi
     [ -L "$SYS_CCS" ] && rm "$SYS_CCS" 2>/dev/null
     [ -L "$SYS_CLAUDE" ] && rm "$SYS_CLAUDE" 2>/dev/null

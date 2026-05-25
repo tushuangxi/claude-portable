@@ -84,15 +84,18 @@ WE_STARTED_CCS=0
 # 退出时清理符号链接
 cleanup() {
     if [ "$WE_STARTED_CCS" = "1" ] && [ -n "$CC_SWITCH_PID" ] && kill -0 "$CC_SWITCH_PID" 2>/dev/null; then
-        kill -TERM "-$CC_SWITCH_PID" 2>/dev/null || kill "$CC_SWITCH_PID" 2>/dev/null
+        kill -TERM "$CC_SWITCH_PID" 2>/dev/null
         for _ in 1 2 3 4 5; do
             kill -0 "$CC_SWITCH_PID" 2>/dev/null || break
             sleep 1
         done
         if kill -0 "$CC_SWITCH_PID" 2>/dev/null; then
-            kill -9 "-$CC_SWITCH_PID" 2>/dev/null || kill -9 "$CC_SWITCH_PID" 2>/dev/null
+            kill -9 "$CC_SWITCH_PID" 2>/dev/null
         fi
-        pkill -f "[Cc][Cc].?[Ss]witch" 2>/dev/null
+        # 仅清理本进程的直接子进程
+        for child in $(pgrep -P "$CC_SWITCH_PID" 2>/dev/null); do
+            kill -9 "$child" 2>/dev/null
+        done
     fi
     [ -L "$SYS_CCS" ] && rm "$SYS_CCS" 2>/dev/null
     [ -L "$SYS_CLAUDE" ] && rm "$SYS_CLAUDE" 2>/dev/null
