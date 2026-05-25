@@ -1,7 +1,5 @@
 # Extract ANTHROPIC_BASE_URL and ANTHROPIC_AUTH_TOKEN from cc-switch.db
 # Usage: powershell -File extract-config.ps1 <db_path> <out_url> <out_key>
-# Exits 0 on success, 1 on failure.
-
 param(
     [Parameter(Mandatory=$true)][string]$DbPath,
     [Parameter(Mandatory=$true)][string]$OutUrl,
@@ -11,11 +9,14 @@ param(
 if (-not (Test-Path $DbPath)) { exit 1 }
 
 try {
-    $bytes = [IO.File]::ReadAllBytes($DbPath)
+    # Open with FileShare.ReadWrite so we don't conflict with cc-switch holding the file
+    $fs = [IO.FileStream]::new($DbPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+    $bytes = New-Object byte[] $fs.Length
+    [void]$fs.Read($bytes, 0, $fs.Length)
+    $fs.Close()
+
     $text = [Text.Encoding]::UTF8.GetString($bytes)
 
-    # Find all settings_config JSON blobs and extract the active claude one
-    # SQLite stores them as raw text in the file
     $urlMatch = [regex]::Match($text, '"ANTHROPIC_BASE_URL"\s*:\s*"([^"]+)"')
     $keyMatch = [regex]::Match($text, '"ANTHROPIC_AUTH_TOKEN"\s*:\s*"([^"]+)"')
     if (-not $keyMatch.Success) {
