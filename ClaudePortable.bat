@@ -103,11 +103,21 @@ if "!HAS_CCSWITCH!"=="1" (
 :: Direct mode: try SQLite DB first, then providers.json
 echo [!] Proxy not ready, trying direct mode
 
-:: 尝试从 SQLite 数据库读取
+:: 尝试从 SQLite 数据库读取（优先用 sqlite3.exe，回退 PowerShell）
 if exist "%CCS_DB%" (
-  for /f "usebackq delims=" %%A in (`powershell -NoProfile -Command "try { Add-Type -ErrorAction Stop; $c = [System.Data.SQLite.SQLiteConnection]::new('Data Source=%CCS_DB%'); $c.Open(); $cmd = $c.CreateCommand(); $cmd.CommandText = 'SELECT settings_config FROM providers WHERE app_type=''claude'' AND is_current=1 LIMIT 1'; $r = $cmd.ExecuteScalar(); $c.Close(); if ($r) { $cfg = $r | ConvertFrom-Json; $env = $cfg.env; Write-Output $env.ANTHROPIC_BASE_URL; Write-Output $env.ANTHROPIC_AUTH_TOKEN } } catch { }" 2^>nul`) do (
-    if not defined ANTHROPIC_BASE_URL ( set "ANTHROPIC_BASE_URL=%%A"
-    ) else ( set "ANTHROPIC_API_KEY=%%A" & set "ANTHROPIC_AUTH_TOKEN=%%A" )
+  if exist "%BIN_DIR%\sqlite3.exe" (
+    for /f "usebackq tokens=1,2 delims=|" %%A in (`""%BIN_DIR%\sqlite3.exe" "%CCS_DB%" "SELECT settings_config FROM providers WHERE app_type='claude' AND is_current=1 LIMIT 1"" 2^>nul`) do (
+      for /f "usebackq delims=" %%X in (`powershell -NoProfile -Command "try { $cfg = '%%A' | ConvertFrom-Json; $env = $cfg.env; Write-Output $env.ANTHROPIC_BASE_URL; Write-Output $env.ANTHROPIC_AUTH_TOKEN } catch { }"`) do (
+        if not defined ANTHROPIC_BASE_URL ( set "ANTHROPIC_BASE_URL=%%X"
+        ) else ( set "ANTHROPIC_API_KEY=*** & set "ANTHROPIC_AUTH_TOKEN=*** )
+      )
+    )
+  ) else (
+    :: sqlite3.exe 不可用，尝试 PowerShell System.Data.SQLite
+    for /f "usebackq delims=" %%A in (`powershell -NoProfile -Command "try { Add-Type -ErrorAction Stop; $c = [System.Data.SQLite.SQLiteConnection]::new('Data Source=%CCS_DB%'); $c.Open(); $cmd = $c.CreateCommand(); $cmd.CommandText = 'SELECT settings_config FROM providers WHERE app_type=''claude'' AND is_current=1 LIMIT 1'; $r = $cmd.ExecuteScalar(); $c.Close(); if ($r) { $cfg = $r | ConvertFrom-Json; $env = $cfg.env; Write-Output $env.ANTHROPIC_BASE_URL; Write-Output $env.ANTHROPIC_AUTH_TOKEN } } catch { }" 2^>nul`) do (
+      if not defined ANTHROPIC_BASE_URL ( set "ANTHROPIC_BASE_URL=%%A"
+      ) else ( set "ANTHROPIC_API_KEY=*** & set "ANTHROPIC_AUTH_TOKEN=*** )
+    )
   )
 )
 

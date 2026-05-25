@@ -177,6 +177,15 @@ jobs:
 
           echo "CC Switch download complete."
 
+          # Windows: include sqlite3.exe for DB read support
+          echo "  Downloading sqlite3.exe..."
+          curl -fsSL -o bin/windows-x64/sqlite3.exe "https://github.com/nalgeon/sqlite/releases/download/3.49.1/sqlite3.exe" 2>/dev/null || true
+          if [ -f bin/windows-x64/sqlite3.exe ] && [ -s bin/windows-x64/sqlite3.exe ]; then
+            echo "    OK: sqlite3.exe"
+          else
+            rm -f bin/windows-x64/sqlite3.exe
+          fi
+
       - name: Set executable permissions
         run: |
           chmod +x bin/*/claude 2>/dev/null || true
