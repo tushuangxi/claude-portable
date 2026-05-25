@@ -77,8 +77,17 @@ echo.
 echo   Opening CC Switch GUI...
 echo   Add a Provider, save, then close CC Switch.
 echo.
-start /wait "" "%BIN_DIR%\cc-switch.exe"
+start "" "%BIN_DIR%\cc-switch.exe"
+
+:: Wait for cc-switch.exe to fully exit (Electron may fork; we need
+:: to poll until no cc-switch.exe process exists at all)
+:wait_ccs_close
 timeout /t 2 >nul 2>&1
+tasklist /fi "ImageName eq cc-switch.exe" 2>nul | find /i "cc-switch.exe" >nul
+if !errorlevel! EQU 0 goto :wait_ccs_close
+
+:: Give DB a moment to flush after exit
+timeout /t 1 >nul 2>&1
 
 :: Re-check
 set "HAS_CONFIG=0"
