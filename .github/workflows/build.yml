@@ -119,7 +119,7 @@ jobs:
 
           # Linux x64 (AppImage)
           echo "  Linux..."
-          LATEST_TAG=$(curl -fsSL https://api.github.com/repos/farion1231/cc-switch/releases/latest | grep -o '"tag_name":"[^"]*"' | cut -d'"' -f4 | sed 's/^v//')
+          LATEST_TAG=$(curl -fsSL https://api.github.com/repos/farion1231/cc-switch/releases/latest | grep -o '"tag_name":"[^"]*"' | cut -d'"' -f4 | sed 's/^v//') || LATEST_TAG=""
           curl -fsSL -o bin/linux-x64/cc-switch "$BASE/CC-Switch-v${LATEST_TAG}-Linux-x86_64.AppImage" 2>/dev/null || true
           if [ -f bin/linux-x64/cc-switch ] && [ -s bin/linux-x64/cc-switch ]; then
             chmod +x bin/linux-x64/cc-switch
