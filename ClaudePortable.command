@@ -94,13 +94,32 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 # ═══════════════════════════════════════════
-# 检查配置
+# 检查配置（验证 DB 中真有 provider，不只是文件大小）
 # ═══════════════════════════════════════════
 has_valid_config() {
     [ -f "$CCS_DB" ] || return 1
-    local size
-    size=$(stat -f%z "$CCS_DB" 2>/dev/null || stat -c%s "$CCS_DB" 2>/dev/null || echo 0)
-    [ "$size" -gt 1024 ]
+    if ! command -v python3 &>/dev/null; then
+        # 无 python3 时退化到大小检查（不可靠）
+        local size
+        size=$(stat -f%z "$CCS_DB" 2>/dev/null || stat -c%s "$CCS_DB" 2>/dev/null || echo 0)
+        [ "$size" -gt 4096 ]
+        return $?
+    fi
+    CCS_DB="$CCS_DB" python3 - <<'PYEOF' 2>/dev/null
+import os, re, sys
+try:
+    with open(os.environ['CCS_DB'], 'rb') as f:
+        text = f.read().decode('utf-8', errors='replace')
+    url = re.search(r'"ANTHROPIC_BASE_URL"\s*:\s*"([^"]+)"', text)
+    key = re.search(r'"ANTHROPIC_AUTH_TOKEN"\s*:\s*"([^"]+)"', text)
+    if not key:
+        key = re.search(r'"ANTHROPIC_API_KEY"\s*:\s*"([^"]+)"', text)
+    if url and key and len(url.group(1)) > 5 and len(key.group(1)) > 5:
+        sys.exit(0)
+except Exception:
+    pass
+sys.exit(1)
+PYEOF
 }
 
 if ! has_valid_config; then
