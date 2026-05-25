@@ -28,6 +28,24 @@ export CLAUDE_CONFIG_DIR="$SCRIPT_DIR/data/.claude"
 export CLAUDE_HOME="$SCRIPT_DIR/data/.claude"
 mkdir -p "$CLAUDE_CONFIG_DIR" "$SCRIPT_DIR/data"
 
+# 便携式 CC Switch 数据目录（随项目移动）
+PORTABLE_CCS_DIR="$SCRIPT_DIR/data/cc-switch"
+mkdir -p "$PORTABLE_CCS_DIR"
+
+sync_db_to_home() {
+    if [ -f "$PORTABLE_CCS_DIR/cc-switch.db" ]; then
+        mkdir -p "$HOME/.cc-switch"
+        cp "$PORTABLE_CCS_DIR/cc-switch.db" "$HOME/.cc-switch/cc-switch.db" 2>/dev/null
+    fi
+}
+
+sync_db_to_portable() {
+    if [ -f "$HOME/.cc-switch/cc-switch.db" ]; then
+        mkdir -p "$PORTABLE_CCS_DIR"
+        cp "$HOME/.cc-switch/cc-switch.db" "$PORTABLE_CCS_DIR/cc-switch.db" 2>/dev/null
+    fi
+}
+
 # ═══════════════════════════════════════════
 # 首次运行引导
 # ═══════════════════════════════════════════
@@ -90,11 +108,15 @@ PYEOF
 CC_SWITCH_RUNNING=0
 CC_SWITCH_PID=""
 
-# 清理后台进程
-cleanup() { [ -n "$CC_SWITCH_PID" ] && kill "$CC_SWITCH_PID" 2>/dev/null; }
+# 清理后台进程 + 保存数据
+cleanup() {
+    [ -n "$CC_SWITCH_PID" ] && kill "$CC_SWITCH_PID" 2>/dev/null
+    sync_db_to_portable
+}
 trap cleanup EXIT INT TERM
 
 if [ -f "$BIN_DIR/cc-switch" ]; then
+    sync_db_to_home
     echo "  启动 CC Switch...（代理端口 $CC_SWITCH_PORT）"
     "$BIN_DIR/cc-switch" &>/dev/null &
     CC_SWITCH_PID=$!
@@ -159,3 +181,4 @@ echo "  模式: $PROXY_MODE"
 echo ""
 
 "$BIN_DIR/claude" "$@"
+sync_db_to_portable
