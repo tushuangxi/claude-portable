@@ -72,6 +72,9 @@ if [ ! -f "$FIRST_RUN_FLAG" ]; then
     echo "    2. 命令行快速配置"
     echo ""
     read -p "  选择方式 [1/2]: " choice
+    if [ -z "$choice" ]; then
+        exit 0
+    fi
 
     if [ "$choice" = "1" ]; then
         echo ""
@@ -102,8 +105,10 @@ PYEOF
     echo ""
     echo "  命令行配置："
     echo ""
-    read -p "  API 地址 (Base URL): " api_base
-    read -p "  API Key: " api_key
+    read -rsp "  API 地址 (Base URL): " api_base
+    echo ""
+    read -rsp "  API Key: " api_key
+    echo ""
     if [ -z "$api_base" ] || [ -z "$api_key" ]; then
         echo "[ERROR] API 地址和 Key 不能为空"
         exit 1
@@ -159,9 +164,15 @@ trap cleanup EXIT INT TERM
 
 if [ -f "$BIN_DIR/cc-switch" ]; then
     sync_db_to_home
-    echo "  启动 CC Switch...（代理端口 $CC_SWITCH_PORT）"
-    "$BIN_DIR/cc-switch" &>/dev/null &
-    CC_SWITCH_PID=$!
+    # 检查是否已在运行
+    if pgrep -q "cc-switch" 2>/dev/null; then
+        echo "  CC Switch 已在运行"
+    else
+        echo "  启动 CC Switch...（代理端口 $CC_SWITCH_PORT）"
+        "$BIN_DIR/cc-switch" &>/dev/null &
+        CC_SWITCH_PID=$!
+        sleep 1
+    fi
 
     for i in $(seq 1 20); do
         if nc -z -w1 127.0.0.1 "$CC_SWITCH_PORT" 2>/dev/null; then
