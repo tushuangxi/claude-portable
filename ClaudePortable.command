@@ -59,9 +59,21 @@ if [ ! -f "$FIRST_RUN_FLAG" ]; then
         echo "  然后重新运行此脚本。"
         echo ""
         "$BIN_DIR/cc-switch" 2>/dev/null || true
-        # 检查用户是否配置了 provider
-        if python3 -c "import json; d=json.load(open('$CONFIG_FILE')); exit(0 if d.get('providers') else 1)" 2>/dev/null; then
-            touch "$FIRST_RUN_FLAG"
+# 检查 CC Switch 数据库是否有 provider（不用 providers.json，CC Switch 存 SQLite）
+        CCS_DB="$HOME/.cc-switch/cc-switch.db"
+        if [ -f "$CCS_DB" ]; then
+            CCS_COUNT=$(python3 <<-PYEOF 2>/dev/null
+import sqlite3, sys
+try:
+    db = sqlite3.connect('$CCS_DB')
+    count = db.execute("SELECT COUNT(*) FROM providers").fetchone()[0]
+    db.close()
+    print(count)
+    sys.exit(0 if count > 0 else 1)
+except Exception:
+    sys.exit(1)
+PYEOF
+) && touch "$FIRST_RUN_FLAG" && echo "  [ok] 检测到 $CCS_COUNT 个已启用的 Provider"
         fi
         exit 0
     fi
@@ -106,11 +118,35 @@ fi
 # ═══════════════════════════════════════════
 # 启动 CC Switch 代理
 # ═══════════════════════════════════════════
-CC_SWITCH_PORT="${CC_SWITCH_PORT:-18080}"
+CCS_DB="$HOME/.cc-switch/cc-switch.db"
+CC_SWITCH_PORT=$(python3 <<-PYEOF 2>/dev/null
+import sqlite3, sys
+try:
+    db = sqlite3.connect('$CCS_DB')
+    row = db.execute("SELECT listen_port FROM proxy_config WHERE app_type='claude' LIMIT 1").fetchone()
+    db.close()
+    if row:
+        print(row[0])
+    else:
+        print(18080)
+except:
+    print(18080)
+PYEOF
+)
+[ -z "$CC_SWITCH_PORT" ] && CC_SWITCH_PORT=18080
 CC_SWITCH_RUNNING=0
+CC_SWITCH_PID=""
+
+# 清理后台进程（防止 Ctrl+C 残留）
+cleanup() {
+    if [ -n "$CC_SWITCH_PID" ]; then
+        kill "$CC_SWITCH_PID" 2>/dev/null
+    fi
+}
+trap cleanup EXIT INT TERM
 
 if [ -f "$BIN_DIR/cc-switch" ]; then
-    echo "  启动 CC Switch..."
+    echo "  启动 CC Switch...（代理端口 $CC_SWITCH_PORT）"
     # 直接后台执行（不用 open，cc-switch 不是 .app bundle）
     "$BIN_DIR/cc-switch" &>/dev/null &
     CC_SWITCH_PID=$!
@@ -136,25 +172,28 @@ else
     PROXY_MODE="直连（未找到 CC Switch）"
 fi
 
-# 直连模式：从配置文件读取
-if [ "$CC_SWITCH_RUNNING" -eq 0 ] && [ -f "$CONFIG_FILE" ]; then
-    eval "$(CONFIG_FILE="$CONFIG_FILE" python3 -c "
-import json, os
+# 直连模式：从 CC Switch SQLite 读取活跃 Provider
+if [ "$CC_SWITCH_RUNNING" -eq 0 ] && [ -f "$CCS_DB" ]; then
+    eval "$(python3 <<-PYEOF 2>/dev/null
+import sqlite3, json
 try:
-    with open(os.environ['CONFIG_FILE']) as f:
-        d = json.load(f)
-    providers = d.get('providers', [])
-    active = d.get('active_provider')
-    p = None
-    if active:
-        p = next((x for x in providers if x.get('id') == active), None)
-    if not p and providers:
-        p = providers[0]
-    if p:
-        print(f'export ANTHROPIC_BASE_URL=\"{p[\"base_url\"]}\"')
-        print(f'export ANTHROPIC_API_KEY=\"{p[\"api_key\"]}\"')
-except: pass
-" 2>/dev/null)" || true
+    db = sqlite3.connect('$CCS_DB')
+    # 取当前激活的 claude provider
+    row = db.execute("SELECT settings_config FROM providers WHERE app_type='claude' AND is_current=1 LIMIT 1").fetchone()
+    db.close()
+    if row:
+        cfg = json.loads(row[0])
+        env = cfg.get('env', {})
+        base_url = env.get('ANTHROPIC_BASE_URL', '')
+        api_key = env.get('ANTHROPIC_AUTH_TOKEN', '')
+        if base_url and api_key:
+            print(f'export ANTHROPIC_BASE_URL=\"{base_url}\"')
+            print(f'export ANTHROPIC_AUTH_TOKEN=\"{api_key}\"')
+            print(f'export ANTHROPIC_API_KEY=\"{api_key}\"')
+except:
+    pass
+PYEOF
+)" || true
 fi
 
 # 检查是否有配置

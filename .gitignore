@@ -8,7 +8,11 @@ bin/
 # Session data (user-specific)
 data/.claude/
 data/**/*.jsonl
+data/**/*.jsonl.gz
 
 # Temp
 *.tmp
 *.swp
+
+# Dev artifacts
+.hermes/
