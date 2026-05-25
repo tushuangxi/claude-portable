@@ -3,6 +3,11 @@ setlocal enabledelayedexpansion
 chcp 65001 >nul 2>&1
 title Claude Code Portable + CC Switch
 
+REM Clear conflicting auth vars from inherited environment
+set "ANTHROPIC_API_KEY="
+set "ANTHROPIC_AUTH_TOKEN="
+set "ANTHROPIC_BASE_URL="
+
 REM Enable ANSI escape codes
 for /F %%a in ('echo prompt $E ^| cmd') do set "ESC=%%a"
 
@@ -126,17 +131,23 @@ set "TMP_URL=%TEMP%\ccs_url_%RANDOM%.txt"
 set "TMP_KEY=%TEMP%\ccs_key_%RANDOM%.txt"
 
 if exist "%LIB_DIR%\extract-config.ps1" (
-  powershell -NoProfile -ExecutionPolicy Bypass -File "%LIB_DIR%\extract-config.ps1" "%CCS_DB%" "!TMP_URL!" "!TMP_KEY!" >nul 2>&1
-  if exist "!TMP_URL!" (
-    set /p ANTHROPIC_BASE_URL=<"!TMP_URL!"
-    set /p ANTHROPIC_API_KEY=<"!TMP_KEY!"
-    set "ANTHROPIC_AUTH_TOKEN=!ANTHROPIC_API_KEY!"
-    del "!TMP_URL!" "!TMP_KEY!" >nul 2>&1
-    echo   [ok] Config loaded
+  :: Retry up to 3 times in case DB is still being written
+  for /l %%I in (1,1,3) do (
+    if "!ANTHROPIC_AUTH_TOKEN!"=="" (
+      powershell -NoProfile -ExecutionPolicy Bypass -File "%LIB_DIR%\extract-config.ps1" "%CCS_DB%" "!TMP_URL!" "!TMP_KEY!" >nul 2>&1
+      if exist "!TMP_URL!" (
+        set /p ANTHROPIC_BASE_URL=<"!TMP_URL!"
+        set /p ANTHROPIC_AUTH_TOKEN=<"!TMP_KEY!"
+        del "!TMP_URL!" "!TMP_KEY!" >nul 2>&1
+        echo   [ok] Config loaded
+      ) else (
+        timeout /t 2 >nul 2>&1
+      )
+    )
   )
 )
 
-if "!ANTHROPIC_API_KEY!"=="" (
+if "!ANTHROPIC_AUTH_TOKEN!"=="" (
   echo   [!] Failed to load config.
   pause & exit /b 1
 )

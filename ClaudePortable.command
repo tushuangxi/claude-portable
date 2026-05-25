@@ -161,8 +161,8 @@ PYEOF
         return 1
     fi
     export ANTHROPIC_BASE_URL=$(echo "$result" | head -1)
-    export ANTHROPIC_API_KEY=$(echo "$result" | tail -1)
-    export ANTHROPIC_AUTH_TOKEN="$ANTHROPIC_API_KEY"
+    export ANTHROPIC_AUTH_TOKEN=$(echo "$result" | tail -1)
+    unset ANTHROPIC_API_KEY
     return 0
 }
 
