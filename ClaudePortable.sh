@@ -60,6 +60,41 @@ if [ ! -f "$FIRST_RUN_FLAG" ]; then
     echo ""
     echo "  Claude Code 需要 API 才能运行。"
     echo ""
+    echo "  支持的方式："
+    echo "    1. CC Switch 图形界面配置（推荐）"
+    echo "    2. 命令行快速配置"
+    echo ""
+    read -p "  选择方式 [1/2]: " choice
+
+    if [ "$choice" = "1" ]; then
+        echo ""
+        echo "  正在打开 CC Switch..."
+        echo "  请在 CC Switch 中添加 Provider，保存后关闭 CC Switch。"
+        echo "  然后重新运行此脚本。"
+        echo ""
+        "$BIN_DIR/cc-switch" 2>/dev/null || true
+        CCS_DB="$HOME/.cc-switch/cc-switch.db"
+        if [ -f "$CCS_DB" ]; then
+            CCS_COUNT=$(python3 <<-PYEOF 2>/dev/null
+import sqlite3, sys
+try:
+    db = sqlite3.connect('$CCS_DB')
+    count = db.execute("SELECT COUNT(*) FROM providers").fetchone()[0]
+    db.close()
+    print(count)
+    sys.exit(0 if count > 0 else 1)
+except Exception:
+    sys.exit(1)
+PYEOF
+) && touch "$FIRST_RUN_FLAG" && echo "  [ok] 检测到 $CCS_COUNT 个已启用的 Provider"
+            sync_db_to_portable
+        fi
+        exit 0
+    fi
+
+    echo ""
+    echo "  命令行配置："
+    echo ""
     read -p "  API 地址 (Base URL): " api_base
     read -p "  API Key: " api_key
 
@@ -142,9 +177,10 @@ else
     PROXY_MODE="直连（未找到 CC Switch）"
 fi
 
-# 直连模式：从 SQLite 读取活跃 Provider
-if [ "$CC_SWITCH_RUNNING" -eq 0 ] && [ -f "$CCS_DB" ]; then
-    eval "$(python3 <<-PYEOF 2>/dev/null
+# 直连模式：先查 SQLite DB，回退到 providers.json
+if [ "$CC_SWITCH_RUNNING" -eq 0 ]; then
+    if [ -f "$CCS_DB" ]; then
+        eval "$(python3 <<-PYEOF 2>/dev/null
 import sqlite3, json
 try:
     db = sqlite3.connect('$CCS_DB')
@@ -163,6 +199,24 @@ except:
     pass
 PYEOF
 )" || true
+    fi
+
+    if [ -z "$ANTHROPIC_API_KEY" ] && [ -f "$CONFIG_FILE" ]; then
+        eval "$(python3 <<-PYEOF 2>/dev/null
+import json
+try:
+    with open('$CONFIG_FILE') as f:
+        d = json.load(f)
+    for p in d.get('providers', []):
+        if p.get('enabled') and p.get('base_url') and p.get('api_key'):
+            print('export ANTHROPIC_BASE_URL=\"' + p.get('base_url', '') + '\"')
+            print('export ANTHROPIC_API_KEY=\"' + p.get('api_key', '') + '\"')
+            break
+except:
+    pass
+PYEOF
+)" || true
+    fi
 fi
 
 if [ -z "$ANTHROPIC_API_KEY" ]; then
