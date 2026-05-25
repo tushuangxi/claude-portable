@@ -23,6 +23,7 @@ set "CONFIG_DIR=%SCRIPT_DIR%data\.claude"
 set "CONFIG_FILE=%SCRIPT_DIR%config\ccswitch\providers.json"
 set "PORTABLE_CCS=%SCRIPT_DIR%data\cc-switch"
 set "CCS_DB=%USERPROFILE%\.cc-switch\cc-switch.db"
+set "LIB_DIR=%SCRIPT_DIR%lib"
 
 if not exist "%BIN_DIR%\claude.exe" (
   echo [ERROR] Claude Code not found: %BIN_DIR%\claude.exe
@@ -37,19 +38,21 @@ if exist "%PORTABLE_CCS%\cc-switch.db" (
   for %%F in ("%CCS_DB%") do if not exist "%%~dpF" mkdir "%%~dpF"
   if not exist "%CCS_DB%" (
     copy /y "%PORTABLE_CCS%\cc-switch.db" "%CCS_DB%" >nul 2>&1
-  ) else (
-    :: Compare timestamps: copy only if portable is newer
-    set "CP_SYNC_SRC=%PORTABLE_CCS%\cc-switch.db"
-    set "CP_SYNC_DST=%CCS_DB%"
-    powershell -NoProfile -Command "if ((Get-Item $env:CP_SYNC_SRC).LastWriteTime -gt (Get-Item $env:CP_SYNC_DST).LastWriteTime) { exit 0 } else { exit 1 }" >nul 2>&1
-    if !errorlevel! EQU 0 copy /y "%PORTABLE_CCS%\cc-switch.db" "%CCS_DB%" >nul 2>&1
   )
 )
 
 :: =============================================
-:: Check if valid config exists (DB or JSON)
+:: Check if valid config exists
 :: =============================================
-call :check_has_provider
+set "HAS_CONFIG=0"
+if exist "%CCS_DB%" (
+  for %%F in ("%CCS_DB%") do if %%~zF GTR 1024 set "HAS_CONFIG=1"
+)
+if "!HAS_CONFIG!"=="0" (
+  if exist "%CONFIG_FILE%" (
+    for %%F in ("%CONFIG_FILE%") do if %%~zF GTR 10 set "HAS_CONFIG=1"
+  )
+)
 if "!HAS_CONFIG!"=="1" goto :skip_first_run
 
 :: =============================================
@@ -69,20 +72,13 @@ goto :first_run_manual
 
 :first_run_gui
 echo Opening CC Switch...
-echo   (Configure your provider in CC Switch, then close it)
-echo.
 start /wait "" "%BIN_DIR%\cc-switch.exe"
-:: If start /wait returned immediately (Electron app), wait for user
 timeout /t 2 >nul 2>&1
-tasklist /fi "ImageName eq cc-switch.exe" 2>nul | find /i "cc-switch" >nul
-if !errorlevel! EQU 0 (
-  echo   CC Switch is still running. Press any key after you finish configuring...
-  pause >nul
-  :: Give CC Switch time to flush DB
-  timeout /t 2 >nul 2>&1
+:: Re-check
+set "HAS_CONFIG=0"
+if exist "%CCS_DB%" (
+  for %%F in ("%CCS_DB%") do if %%~zF GTR 1024 set "HAS_CONFIG=1"
 )
-:: Re-check after GUI closes
-call :check_has_provider
 if "!HAS_CONFIG!"=="1" (
   echo [ok] Provider detected
   if exist "%CCS_DB%" copy /y "%CCS_DB%" "%PORTABLE_CCS%\cc-switch.db" >nul
@@ -97,7 +93,6 @@ set /p API_BASE="  API Base URL: "
 set /p AKEY="  API Key: "
 if "!API_BASE!"=="" echo [ERROR] Required & pause & exit /b 1
 if "!AKEY!"=="" echo [ERROR] Required & pause & exit /b 1
-:: Write config via PowerShell using environment variables (avoid injection)
 set "CP_API_BASE=!API_BASE!"
 set "CP_API_KEY=!AKEY!"
 set "CP_CONFIG_FILE=%CONFIG_FILE%"
@@ -107,7 +102,7 @@ if !errorlevel! NEQ 0 (
   pause & exit /b 1
 )
 echo [ok] Config saved
-:: Manual config: skip proxy, use direct mode with configured values
+:: Use the values directly
 set "ANTHROPIC_BASE_URL=!API_BASE!"
 set "ANTHROPIC_API_KEY=!AKEY!"
 set "ANTHROPIC_AUTH_TOKEN=!AKEY!"
@@ -115,160 +110,59 @@ goto :run_claude
 
 :skip_first_run
 :: =============================================
-:: Start CC Switch proxy
+:: Read API config from DB using lib\extract-config.ps1
 :: =============================================
-set "CC_SWITCH_PORT=15721"
-set "HAS_CCSWITCH=0"
-set "WE_STARTED_CCS=0"
+set "TMP_URL=%TEMP%\ccs_url_%RANDOM%.txt"
+set "TMP_KEY=%TEMP%\ccs_key_%RANDOM%.txt"
 
-if not exist "%BIN_DIR%\cc-switch.exe" goto :no_ccswitch
+:: Method 1: Use bundled PowerShell helper script
+if exist "%LIB_DIR%\extract-config.ps1" (
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%LIB_DIR%\extract-config.ps1" "%CCS_DB%" "!TMP_URL!" "!TMP_KEY!" >nul 2>&1
+  if exist "!TMP_URL!" (
+    set /p ANTHROPIC_BASE_URL=<"!TMP_URL!"
+    set /p ANTHROPIC_API_KEY=<"!TMP_KEY!"
+    set "ANTHROPIC_AUTH_TOKEN=!ANTHROPIC_API_KEY!"
+    del "!TMP_URL!" "!TMP_KEY!" >nul 2>&1
+    echo   [ok] Config loaded from CC Switch DB
+    goto :run_claude
+  )
+)
 
-:: Read port from DB if available
+:: Method 2: sqlite3.exe (bundled by CI)
 if exist "%CCS_DB%" (
   if exist "%BIN_DIR%\sqlite3.exe" (
-    for /f "usebackq delims=" %%P in (`"%BIN_DIR%\sqlite3.exe" "%CCS_DB%" "SELECT listen_port FROM proxy_config WHERE app_type='claude' LIMIT 1" 2^>nul`) do (
-      set "CC_SWITCH_PORT=%%P"
-    )
-  ) else (
-    :: No sqlite3.exe — call subroutine to write PS script
-    set "CP_DB_PATH=%CCS_DB%"
-    set "PS_PORT=%TEMP%\ccs_port_%RANDOM%%RANDOM%.ps1"
-    call :write_port_script "!PS_PORT!"
-    for /f "usebackq delims=" %%P in (`powershell -NoProfile -ExecutionPolicy Bypass -File "!PS_PORT!" 2^>nul`) do (
-      set "CC_SWITCH_PORT=%%P"
-    )
-    del "!PS_PORT!" >nul 2>&1
-  )
-)
-
-:: Check if already running, and if so, find its actual listening port
-tasklist /fi "ImageName eq cc-switch.exe" 2>nul | find /i "cc-switch" >nul
-if !errorlevel! EQU 0 (
-  echo   CC Switch [already running]
-  :: Get cc-switch PIDs, then find their listening ports via netstat
-  set "CCS_PIDS="
-  for /f "tokens=2 delims=," %%P in ('tasklist /fi "ImageName eq cc-switch.exe" /fo csv /nh 2^>nul') do (
-    set "PID_RAW=%%~P"
-    if defined CCS_PIDS (
-      set "CCS_PIDS=!CCS_PIDS! !PID_RAW!"
-    ) else (
-      set "CCS_PIDS=!PID_RAW!"
-    )
-  )
-  :: Scan netstat for listening ports owned by cc-switch
-  for /f "tokens=2,5" %%A in ('netstat -ano ^| findstr "LISTENING"') do (
-    for %%X in (!CCS_PIDS!) do (
-      if "%%B"=="%%X" (
-        for /f "tokens=2 delims=:" %%K in ("%%A") do (
-          if not defined DETECTED_PORT set "DETECTED_PORT=%%K"
-        )
-      )
-    )
-  )
-  if defined DETECTED_PORT (
-    set "CC_SWITCH_PORT=!DETECTED_PORT!"
-    echo   Detected proxy port: !CC_SWITCH_PORT!
-  )
-) else (
-  echo   Starting CC Switch... port !CC_SWITCH_PORT!
-  start "" "%BIN_DIR%\cc-switch.exe"
-  set "WE_STARTED_CCS=1"
-)
-
-:: Wait for proxy to be ready (short wait if already running, longer if we just started it)
-set "TRIES=0"
-set "MAX_TRIES=30"
-if "!WE_STARTED_CCS!"=="0" set "MAX_TRIES=3"
-:wp_loop
-if !TRIES! GEQ !MAX_TRIES! goto :wp_done
-timeout /t 1 >nul 2>&1
-set /a TRIES+=1
-powershell -NoProfile -Command "try { $c = New-Object Net.Sockets.TcpClient('127.0.0.1', !CC_SWITCH_PORT!); $c.Close(); exit 0 } catch { exit 1 }" >nul 2>&1
-if !errorlevel! EQU 0 (
-  set "HAS_CCSWITCH=1"
-  goto :wp_done
-)
-goto :wp_loop
-:wp_done
-
-:: If port from DB didn't work, scan common cc-switch ports
-if "!HAS_CCSWITCH!"=="0" (
-  echo   Scanning for proxy port...
-  for %%P in (15721 15722 15723 18080 8080 8081 7890 18079 15720) do (
-    if "!HAS_CCSWITCH!"=="0" (
-      powershell -NoProfile -Command "try { $c = New-Object Net.Sockets.TcpClient('127.0.0.1', %%P); $c.Close(); exit 0 } catch { exit 1 }" >nul 2>&1
-      if !errorlevel! EQU 0 (
-        set "CC_SWITCH_PORT=%%P"
-        set "HAS_CCSWITCH=1"
-        echo   Found proxy on port %%P
-      )
-    )
-  )
-)
-
-:no_ccswitch
-if "!HAS_CCSWITCH!"=="1" (
-  set "ANTHROPIC_BASE_URL=http://127.0.0.1:!CC_SWITCH_PORT!"
-  set "ANTHROPIC_API_KEY=portable-key"
-  set "ANTHROPIC_AUTH_TOKEN=portable-key"
-  echo [ok] CC Switch proxy ready
-  goto :run_claude
-)
-
-:: =============================================
-:: Direct mode: read API config from DB or JSON
-:: =============================================
-echo [!] Proxy not ready, trying direct mode
-
-:: Try sqlite3.exe first (bundled by CI)
-if exist "%CCS_DB%" (
-  if exist "%BIN_DIR%\sqlite3.exe" (
-    set "CCS_TMP=%TEMP%\ccs_%RANDOM%%RANDOM%"
-    set "CCS_TMP_RAW=!CCS_TMP!_raw.txt"
-    "%BIN_DIR%\sqlite3.exe" "%CCS_DB%" "SELECT settings_config FROM providers WHERE app_type='claude' AND is_current=1 LIMIT 1" > "!CCS_TMP_RAW!" 2>nul
-    if exist "!CCS_TMP_RAW!" (
-      set "CCS_TMP_URL=!CCS_TMP!_url.txt"
-      set "CCS_TMP_KEY=!CCS_TMP!_key.txt"
+    set "TMP_RAW=%TEMP%\ccs_raw_%RANDOM%.txt"
+    "%BIN_DIR%\sqlite3.exe" "%CCS_DB%" "SELECT settings_config FROM providers WHERE app_type='claude' AND is_current=1 LIMIT 1" > "!TMP_RAW!" 2>nul
+    if exist "!TMP_RAW!" (
+      set "CCS_TMP_URL=!TMP_URL!"
+      set "CCS_TMP_KEY=!TMP_KEY!"
+      set "CCS_TMP_RAW=!TMP_RAW!"
       powershell -NoProfile -Command "try { $raw = Get-Content $env:CCS_TMP_RAW -Raw -ErrorAction Stop; $cfg = $raw | ConvertFrom-Json; $e = $cfg.env; $k = $e.ANTHROPIC_AUTH_TOKEN; if (-not $k) { $k = $e.ANTHROPIC_API_KEY }; if ($e.ANTHROPIC_BASE_URL -and $k) { [IO.File]::WriteAllText($env:CCS_TMP_URL, $e.ANTHROPIC_BASE_URL); [IO.File]::WriteAllText($env:CCS_TMP_KEY, $k) } } catch {}" >nul 2>&1
-      if exist "!CCS_TMP_URL!" (
-        set /p ANTHROPIC_BASE_URL=<"!CCS_TMP_URL!"
-        set /p ANTHROPIC_API_KEY=<"!CCS_TMP_KEY!"
-        set /p ANTHROPIC_AUTH_TOKEN=<"!CCS_TMP_KEY!"
-        del "!CCS_TMP_URL!" "!CCS_TMP_KEY!" >nul 2>&1
+      if exist "!TMP_URL!" (
+        set /p ANTHROPIC_BASE_URL=<"!TMP_URL!"
+        set /p ANTHROPIC_API_KEY=<"!TMP_KEY!"
+        set "ANTHROPIC_AUTH_TOKEN=!ANTHROPIC_API_KEY!"
+        del "!TMP_URL!" "!TMP_KEY!" >nul 2>&1
+        echo   [ok] Config loaded from CC Switch DB
       )
-      del "!CCS_TMP_RAW!" >nul 2>&1
-    )
-  ) else (
-    :: No sqlite3.exe — use PowerShell via temp script (avoids cmd quote hell)
-    set "CP_DB_PATH=%CCS_DB%"
-    set "CCS_TMP3=%TEMP%\ccs_%RANDOM%%RANDOM%"
-    set "CCS_TMP3_URL=!CCS_TMP3!_url.txt"
-    set "CCS_TMP3_KEY=!CCS_TMP3!_key.txt"
-    set "PS_DIRECT=%TEMP%\ccs_direct_%RANDOM%%RANDOM%.ps1"
-    call :write_direct_script "!PS_DIRECT!"
-    powershell -NoProfile -ExecutionPolicy Bypass -File "!PS_DIRECT!" >nul 2>&1
-    del "!PS_DIRECT!" >nul 2>&1
-    if exist "!CCS_TMP3_URL!" (
-      set /p ANTHROPIC_BASE_URL=<"!CCS_TMP3_URL!"
-      set /p ANTHROPIC_API_KEY=<"!CCS_TMP3_KEY!"
-      set /p ANTHROPIC_AUTH_TOKEN=<"!CCS_TMP3_KEY!"
-      del "!CCS_TMP3_URL!" "!CCS_TMP3_KEY!" >nul 2>&1
+      del "!TMP_RAW!" >nul 2>&1
     )
   )
 )
 
-:: Fallback: read from providers.json
+:: Method 3: providers.json fallback
 if "!ANTHROPIC_API_KEY!"=="" (
   if exist "%CONFIG_FILE%" (
     set "CP_CONFIG_FILE=%CONFIG_FILE%"
-    set "CCS_TMP2=%TEMP%\ccs_%RANDOM%%RANDOM%"
-    set "CCS_TMP2_URL=!CCS_TMP2!_url.txt"
-    set "CCS_TMP2_KEY=!CCS_TMP2!_key.txt"
+    set "CCS_TMP2_URL=!TMP_URL!"
+    set "CCS_TMP2_KEY=!TMP_KEY!"
     powershell -NoProfile -Command "$f = $env:CP_CONFIG_FILE; try { $d = Get-Content $f -Raw | ConvertFrom-Json; foreach ($p in $d.providers) { if ($p.enabled -and $p.base_url -and $p.api_key) { [IO.File]::WriteAllText($env:CCS_TMP2_URL, $p.base_url); [IO.File]::WriteAllText($env:CCS_TMP2_KEY, $p.api_key); break } } } catch {}" >nul 2>&1
-    if exist "!CCS_TMP2_URL!" (
-      set /p ANTHROPIC_BASE_URL=<"!CCS_TMP2_URL!"
-      set /p ANTHROPIC_API_KEY=<"!CCS_TMP2_KEY!"
-      del "!CCS_TMP2_URL!" "!CCS_TMP2_KEY!" >nul 2>&1
+    if exist "!TMP_URL!" (
+      set /p ANTHROPIC_BASE_URL=<"!TMP_URL!"
+      set /p ANTHROPIC_API_KEY=<"!TMP_KEY!"
+      set "ANTHROPIC_AUTH_TOKEN=!ANTHROPIC_API_KEY!"
+      del "!TMP_URL!" "!TMP_KEY!" >nul 2>&1
+      echo   [ok] Config loaded from providers.json
     )
   )
 )
@@ -282,141 +176,15 @@ if "!ANTHROPIC_API_KEY!"=="" (
 :: =============================================
 :: Launch Claude Code
 :: =============================================
-set "PROXY_TEXT=Direct mode"
-if "!HAS_CCSWITCH!"=="1" set "PROXY_TEXT=CC Switch Proxy (port !CC_SWITCH_PORT!)"
-echo   Mode: !PROXY_TEXT!
+echo   Mode: Direct (API configured)
 echo.
 set "CLAUDE_CONFIG_DIR=%CONFIG_DIR%"
 set "CLAUDE_HOME=%CONFIG_DIR%"
-if "%~1"=="" (
-  "%BIN_DIR%\claude.exe"
-) else (
-  "%BIN_DIR%\claude.exe" %*
-)
+"%BIN_DIR%\claude.exe" %*
 
 :: Save DB back to portable on exit
-:: First kill cc-switch (if we started it), then copy DB
-if "!WE_STARTED_CCS!"=="1" goto :do_kill
-goto :after_kill
-
-:do_kill
-:: Try graceful close first (WM_CLOSE)
-taskkill /im cc-switch.exe >nul 2>&1
-:: Wait up to 5 seconds for graceful exit
-set "KWAIT=0"
-:kill_wait
-if !KWAIT! GEQ 5 goto :force_kill
-timeout /t 1 >nul 2>&1
-set /a KWAIT+=1
-tasklist /fi "ImageName eq cc-switch.exe" 2>nul | find /i "cc-switch" >nul
-if !errorlevel! NEQ 0 goto :after_kill
-goto :kill_wait
-:force_kill
-taskkill /f /im cc-switch.exe >nul 2>&1
-
-:after_kill
-:: Now cc-switch is stopped, safe to copy DB
 if exist "%CCS_DB%" (
   copy /y "%CCS_DB%" "%PORTABLE_CCS%\cc-switch.db" >nul 2>&1
-  if !errorlevel! NEQ 0 (
-    timeout /t 1 >nul 2>&1
-    copy /y "%CCS_DB%" "%PORTABLE_CCS%\cc-switch.db" >nul 2>&1
-  )
 )
 pause
 exit /b 0
-
-:: =============================================
-:: Subroutine: write port-detection PS script
-:: %1 = output file path
-:: =============================================
-:write_port_script
-> "%~1" echo try {
->> "%~1" echo $f = $env:CP_DB_PATH
->> "%~1" echo $bytes = [IO.File]::ReadAllBytes($f)
->> "%~1" echo $t = [Text.Encoding]::UTF8.GetString($bytes)
->> "%~1" echo $m = [regex]::Match($t, 'listen_port.{1,20}?(\d{4,5})')
->> "%~1" echo if ($m.Success) { Write-Output $m.Groups[1].Value }
->> "%~1" echo } catch {}
-goto :eof
-
-:: =============================================
-:: Subroutine: write port-scan PS script (for already-running cc-switch)
-:: =============================================
-:write_portscan_script
-> "%~1" echo try {
->> "%~1" echo   $procs = Get-Process cc-switch -ErrorAction SilentlyContinue
->> "%~1" echo   if ($procs) {
->> "%~1" echo     $procIds = $procs.Id
->> "%~1" echo     $conns = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue ^| Where-Object { $procIds -contains $_.OwningProcess }
->> "%~1" echo     foreach ($c in ($conns ^| Sort-Object LocalPort)) {
->> "%~1" echo       try { $tc = New-Object Net.Sockets.TcpClient('127.0.0.1', $c.LocalPort); $tc.Close(); Write-Output $c.LocalPort; break } catch {}
->> "%~1" echo     }
->> "%~1" echo   }
->> "%~1" echo } catch {}
-goto :eof
-
-:: =============================================
-:: Subroutine: write fallback port-scan PS script
-:: =============================================
-:write_fallback_script
-> "%~1" echo $procIds = (Get-Process cc-switch -ErrorAction SilentlyContinue).Id
->> "%~1" echo if ($procIds) {
->> "%~1" echo   $conns = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue ^| Where-Object { $procIds -contains $_.OwningProcess }
->> "%~1" echo   foreach ($c in $conns ^| Sort-Object LocalPort) {
->> "%~1" echo     try { $tc = New-Object Net.Sockets.TcpClient('127.0.0.1', $c.LocalPort); $tc.Close(); Write-Output $c.LocalPort; break } catch {}
->> "%~1" echo   }
->> "%~1" echo }
-goto :eof
-
-:: =============================================
-:: Subroutine: write direct-mode config-extraction PS script
-:: =============================================
-:write_direct_script
-> "%~1" echo try {
->> "%~1" echo   $f = $env:CP_DB_PATH
->> "%~1" echo   $bytes = [IO.File]::ReadAllBytes($f)
->> "%~1" echo   $t = [Text.Encoding]::UTF8.GetString($bytes)
->> "%~1" echo   $m = [regex]::Match($t, '"ANTHROPIC_BASE_URL"\s*:\s*"([^"]+)"')
->> "%~1" echo   $mk = [regex]::Match($t, '"ANTHROPIC_AUTH_TOKEN"\s*:\s*"([^"]+)"')
->> "%~1" echo   if (-not $mk.Success) { $mk = [regex]::Match($t, '"ANTHROPIC_API_KEY"\s*:\s*"([^"]+)"') }
->> "%~1" echo   if ($m.Success -and $mk.Success) {
->> "%~1" echo     [IO.File]::WriteAllText($env:CCS_TMP3_URL, $m.Groups[1].Value)
->> "%~1" echo     [IO.File]::WriteAllText($env:CCS_TMP3_KEY, $mk.Groups[1].Value)
->> "%~1" echo   }
->> "%~1" echo } catch {}
-goto :eof
-
-:: =============================================
-:: Subroutine: check if valid provider config exists
-:: Sets HAS_CONFIG=1 if found, 0 otherwise
-:: =============================================
-:check_has_provider
-set "HAS_CONFIG=0"
-
-:: Method 1: DB file exists and is non-trivial (fastest, no dependencies)
-if exist "%CCS_DB%" (
-  for %%F in ("%CCS_DB%") do if %%~zF GTR 1024 set "HAS_CONFIG=1"
-)
-
-:: Method 2: sqlite3.exe precise check (bundled by CI)
-if "!HAS_CONFIG!"=="0" (
-  if exist "%CCS_DB%" (
-    if exist "%BIN_DIR%\sqlite3.exe" (
-      for /f "usebackq delims=" %%N in (`"%BIN_DIR%\sqlite3.exe" "%CCS_DB%" "SELECT COUNT(*) FROM providers WHERE app_type='claude'" 2^>nul`) do (
-        echo(%%N| findstr /r "^[0-9][0-9]*$" >nul 2>&1
-        if !errorlevel! EQU 0 if %%N GTR 0 set "HAS_CONFIG=1"
-      )
-    )
-  )
-)
-
-:: Method 3: providers.json has valid entries
-if "!HAS_CONFIG!"=="0" (
-  if exist "%CONFIG_FILE%" (
-    set "CP_CHK_FILE=%CONFIG_FILE%"
-    powershell -NoProfile -Command "try { $d = Get-Content $env:CP_CHK_FILE -Raw | ConvertFrom-Json; foreach ($p in $d.providers) { if ($p.enabled -and $p.base_url -and $p.api_key) { exit 0 } }; exit 1 } catch { exit 1 }" >nul 2>&1
-    if !errorlevel! EQU 0 set "HAS_CONFIG=1"
-  )
-)
-goto :eof
