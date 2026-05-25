@@ -39,7 +39,10 @@ if not exist "%FIRST_RUN%" (
     echo Press any key after configuring...
     pause >nul
     set "HAS_CFG=0"
-    if exist "%CONFIG_FILE%" (
+    :: 优先检查 CC Switch SQLite 数据库
+    if exist "%USERPROFILE%\.cc-switch\cc-switch.db" set "HAS_CFG=1"
+    :: 回退检查 providers.json
+    if "!HAS_CFG!"=="0" if exist "%CONFIG_FILE%" (
       for /f "usebackq delims=" %%x in (`powershell -NoProfile -Command "try { $d = Get-Content '%CONFIG_FILE%' -Raw | ConvertFrom-Json; if ($d.providers.Count -gt 0) { exit 0 } else { exit 1 } } catch { exit 1 }"`) do set "dummy=%%x"
       if !errorlevel! EQU 0 set "HAS_CFG=1"
     )
@@ -101,7 +104,9 @@ if not defined ANTHROPIC_API_KEY (
 )
 
 :run_claude
-echo Claude Code Portable - Mode: !HAS_CCSWITCH!
+set "PROXY_TEXT=Direct mode"
+if "!HAS_CCSWITCH!"=="1" set "PROXY_TEXT=CC Switch Proxy (port !CC_SWITCH_PORT!)"
+echo Claude Code Portable - Mode: !PROXY_TEXT!
 set "CLAUDE_CONFIG_DIR=%CONFIG_DIR%"
 set "CLAUDE_HOME=%CONFIG_DIR%"
 if "%~1"=="" (

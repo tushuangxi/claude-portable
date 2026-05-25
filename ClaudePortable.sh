@@ -36,6 +36,7 @@ sync_db_to_home() {
     if [ -f "$PORTABLE_CCS_DIR/cc-switch.db" ]; then
         mkdir -p "$HOME/.cc-switch"
         cp "$PORTABLE_CCS_DIR/cc-switch.db" "$HOME/.cc-switch/cc-switch.db" 2>/dev/null
+        echo "  [sync] 已恢复 CC Switch 数据"
     fi
 }
 
@@ -104,19 +105,19 @@ PYEOF
     fi
 
     python3 <<-PYEOF 2>/dev/null
-import json, os
+import json
 config = {
     'providers': [{
         'id': 'custom', 'name': 'Custom API', 'type': 'anthropic',
-        'base_url': os.environ.get('API_BASE', ''),
-        'api_key': os.environ.get('API_KEY', ''),
+        'base_url': '$api_base',
+        'api_key': '$api_key',
         'enabled': True
     }],
     'active_provider': 'custom',
     'proxy_port': 18080,
     'auto_start_proxy': True
 }
-with open(os.environ['CONFIG_FILE'], 'w') as f:
+with open('$CONFIG_FILE', 'w') as f:
     json.dump(config, f, indent=2, ensure_ascii=False)
 PYEOF
 
@@ -134,12 +135,12 @@ try:
     db = sqlite3.connect('$CCS_DB')
     row = db.execute("SELECT listen_port FROM proxy_config WHERE app_type='claude' LIMIT 1").fetchone()
     db.close()
-    print(row[0] if row else 18080)
+    print(row[0] if row else 15721)
 except:
-    print(18080)
+    print(15721)
 PYEOF
 )
-[ -z "$CC_SWITCH_PORT" ] && CC_SWITCH_PORT=18080
+[ -z "$CC_SWITCH_PORT" ] && CC_SWITCH_PORT=15721
 CC_SWITCH_RUNNING=0
 CC_SWITCH_PID=""
 
