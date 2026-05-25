@@ -29,25 +29,29 @@ if not exist "%FIRST_RUN%" (
   echo   1. Open CC Switch GUI - recommended
   echo   2. Manual API key entry
   set /p CHOICE="  Choose [1/2]: "
-  if "!CHOICE!"=="1" (
+if "!CHOICE!"=="1" (
     echo Opening CC Switch...
     start "" "%BIN_DIR%\cc-switch.exe"
     echo Press any key after configuring...
     pause >nul
-set "HAS_CFG=0"
-    :: 优先检查 CC Switch SQLite 数据库（用 PowerShell 支持 UTF-8 路径）
-    powershell -NoProfile -Command "if (Test-Path '%USERPROFILE%\.cc-switch\cc-switch.db') { exit 0 } else { exit 1 }" >nul 2>&1
-    if !errorlevel! EQU 0 set "HAS_CFG=1"
-    :: 回退检查 providers.json
-    if "!HAS_CFG!"=="0" if exist "%CONFIG_FILE%" (
-      for /f "usebackq delims=" %%x in (`powershell -NoProfile -Command "try { $d = Get-Content '%CONFIG_FILE%' -Raw | ConvertFrom-Json; if ($d.providers.Count -gt 0) { exit 0 } else { exit 1 } } catch { exit 1 }"`) do set "dummy=%%x"
-      if !errorlevel! EQU 0 set "HAS_CFG=1"
-    )
-    if "!HAS_CFG!"=="1" (
+    :: 检查 CC Switch 数据库是否已创建（用 PowerShell 避免中文路径问题）
+    powershell -NoProfile -Command "if (Test-Path (Join-Path $env:USERPROFILE '.cc-switch\cc-switch.db')) { exit 0 } else { exit 1 }" >nul 2>&1
+    if !errorlevel! EQU 0 (
       type nul > "%FIRST_RUN%"
       echo [ok] Provider detected
     ) else (
-      echo [!] No provider found
+      :: 回退：检查 providers.json
+      if exist "%CONFIG_FILE%" (
+        for /f "usebackq delims=" %%x in (`powershell -NoProfile -Command "try { $d = Get-Content '%CONFIG_FILE%' -Raw | ConvertFrom-Json; if ($d.providers.Count -gt 0) { exit 0 } else { exit 1 } } catch { exit 1 }"`) do set "dummy=%%x"
+        if !errorlevel! EQU 0 (
+          type nul > "%FIRST_RUN%"
+          echo [ok] Provider detected
+        ) else (
+          echo [!] No provider found
+        )
+      ) else (
+        echo [!] No provider found
+      )
     )
     pause & exit /b 0
   )
