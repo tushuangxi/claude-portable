@@ -48,11 +48,6 @@ set "HAS_CONFIG=0"
 if exist "%CCS_DB%" (
   for %%F in ("%CCS_DB%") do if %%~zF GTR 1024 set "HAS_CONFIG=1"
 )
-if "!HAS_CONFIG!"=="0" (
-  if exist "%CONFIG_FILE%" (
-    for %%F in ("%CONFIG_FILE%") do if %%~zF GTR 10 set "HAS_CONFIG=1"
-  )
-)
 if "!HAS_CONFIG!"=="1" goto :skip_first_run
 
 :: =============================================
