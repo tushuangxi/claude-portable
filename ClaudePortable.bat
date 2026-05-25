@@ -2,14 +2,12 @@
 setlocal enabledelayedexpansion
 chcp 65001 >nul 2>&1
 title Claude Code Portable + CC Switch
-
 set "SCRIPT_DIR=%~dp0"
 set "BIN_DIR=%SCRIPT_DIR%bin\windows-x64"
 set "CONFIG_DIR=%SCRIPT_DIR%data\.claude"
 set "CONFIG_FILE=%SCRIPT_DIR%config\ccswitch\providers.json"
 set "FIRST_RUN=%SCRIPT_DIR%data\.configured"
 set "PORTABLE_CCS=%SCRIPT_DIR%data\cc-switch"
-
 if not exist "%BIN_DIR%\claude.exe" (
   echo [ERROR] Claude Code not found
   pause & exit /b 1
@@ -17,13 +15,11 @@ if not exist "%BIN_DIR%\claude.exe" (
 if not exist "%CONFIG_DIR%" mkdir "%CONFIG_DIR%"
 if not exist "%SCRIPT_DIR%data" mkdir "%SCRIPT_DIR%data"
 if not exist "%PORTABLE_CCS%" mkdir "%PORTABLE_CCS%"
-
 :: Sync DB from portable to home
 if exist "%PORTABLE_CCS%\cc-switch.db" (
   if not exist "%USERPROFILE%\.cc-switch" mkdir "%USERPROFILE%\.cc-switch"
   copy /y "%PORTABLE_CCS%\cc-switch.db" "%USERPROFILE%\.cc-switch\cc-switch.db" >nul
 )
-
 if not exist "%FIRST_RUN%" (
   echo.
   echo =====================================
@@ -62,10 +58,8 @@ if not exist "%FIRST_RUN%" (
   type nul > "%FIRST_RUN%"
   echo [ok] Config saved
 )
-
 set "CC_SWITCH_PORT=15721"
 set "HAS_CCSWITCH=0"
-
 if exist "%BIN_DIR%\cc-switch.exe" (
   echo Starting CC Switch... (port !CC_SWITCH_PORT!)
   start "" "%BIN_DIR%\cc-switch.exe"
@@ -79,7 +73,6 @@ if exist "%BIN_DIR%\cc-switch.exe" (
   goto :wp_loop
   :wp_done
 )
-
 if "!HAS_CCSWITCH!"=="1" (
   set "ANTHROPIC_BASE_URL=http://127.0.0.1:!CC_SWITCH_PORT!"
   set "ANTHROPIC_API_KEY=portable-key"
@@ -102,7 +95,6 @@ if not defined ANTHROPIC_API_KEY (
   echo [!] No API configured
   pause & exit /b 1
 )
-
 :run_claude
 set "PROXY_TEXT=Direct mode"
 if "!HAS_CCSWITCH!"=="1" set "PROXY_TEXT=CC Switch Proxy (port !CC_SWITCH_PORT!)"
@@ -114,7 +106,6 @@ if "%~1"=="" (
 ) else (
   "%BIN_DIR%\claude.exe" %*
 )
-
 :: Save DB back to portable
 if exist "%USERPROFILE%\.cc-switch\cc-switch.db" (
   copy /y "%USERPROFILE%\.cc-switch\cc-switch.db" "%PORTABLE_CCS%\cc-switch.db" >nul
