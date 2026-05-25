@@ -130,10 +130,10 @@ if exist "%CCS_DB%" (
       set "CC_SWITCH_PORT=%%P"
     )
   ) else (
-    :: No sqlite3.exe — try PowerShell to read port from DB (via temp script)
+    :: No sqlite3.exe — call subroutine to write PS script
     set "CP_DB_PATH=%CCS_DB%"
     set "PS_PORT=%TEMP%\ccs_port_%RANDOM%%RANDOM%.ps1"
-    > "!PS_PORT!" echo try { $f = $env:CP_DB_PATH; $bytes = [IO.File]::ReadAllBytes($f); $text = [Text.Encoding]::UTF8.GetString($bytes); $m = [regex]::Match($text, 'listen_port.{1,20}?(\d{4,5})'); if ($m.Success) { Write-Output $m.Groups[1].Value } } catch {}
+    call :write_port_script "!PS_PORT!"
     for /f "usebackq delims=" %%P in (`powershell -NoProfile -ExecutionPolicy Bypass -File "!PS_PORT!" 2^>nul`) do (
       set "CC_SWITCH_PORT=%%P"
     )
@@ -147,21 +147,7 @@ if !errorlevel! EQU 0 (
   echo   CC Switch [already running]
   :: Find the actual port cc-switch is listening on (port from DB may be wrong)
   set "PS_PORTSCAN=%TEMP%\ccs_scan_%RANDOM%%RANDOM%.ps1"
-  > "!PS_PORTSCAN!" echo try {
-  >> "!PS_PORTSCAN!" echo   $procs = Get-Process cc-switch -ErrorAction SilentlyContinue
-  >> "!PS_PORTSCAN!" echo   if ($procs) {
-  >> "!PS_PORTSCAN!" echo     $procIds = $procs.Id
-  >> "!PS_PORTSCAN!" echo     $conns = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue ^| Where-Object { $procIds -contains $_.OwningProcess }
-  >> "!PS_PORTSCAN!" echo     foreach ($c in ($conns ^| Sort-Object LocalPort)) {
-  >> "!PS_PORTSCAN!" echo       try {
-  >> "!PS_PORTSCAN!" echo         $tc = New-Object Net.Sockets.TcpClient('127.0.0.1', $c.LocalPort)
-  >> "!PS_PORTSCAN!" echo         $tc.Close()
-  >> "!PS_PORTSCAN!" echo         Write-Output $c.LocalPort
-  >> "!PS_PORTSCAN!" echo         break
-  >> "!PS_PORTSCAN!" echo       } catch {}
-  >> "!PS_PORTSCAN!" echo     }
-  >> "!PS_PORTSCAN!" echo   }
-  >> "!PS_PORTSCAN!" echo } catch {}
+  call :write_portscan_script "!PS_PORTSCAN!"
   for /f "usebackq delims=" %%P in (`powershell -NoProfile -ExecutionPolicy Bypass -File "!PS_PORTSCAN!" 2^>nul`) do (
     set "DETECTED_PORT=%%P"
   )
@@ -195,13 +181,7 @@ goto :wp_loop
 :: If port from DB didn't work, scan common cc-switch ports
 if "!HAS_CCSWITCH!"=="0" (
   set "PS_FALLBACK=%TEMP%\ccs_fb_%RANDOM%%RANDOM%.ps1"
-  > "!PS_FALLBACK!" echo $procIds = (Get-Process cc-switch -ErrorAction SilentlyContinue).Id
-  >> "!PS_FALLBACK!" echo if ($procIds) {
-  >> "!PS_FALLBACK!" echo   $conns = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue ^| Where-Object { $procIds -contains $_.OwningProcess }
-  >> "!PS_FALLBACK!" echo   foreach ($c in $conns ^| Sort-Object LocalPort) {
-  >> "!PS_FALLBACK!" echo     try { $tc = New-Object Net.Sockets.TcpClient('127.0.0.1', $c.LocalPort); $tc.Close(); Write-Output $c.LocalPort; break } catch {}
-  >> "!PS_FALLBACK!" echo   }
-  >> "!PS_FALLBACK!" echo }
+  call :write_fallback_script "!PS_FALLBACK!"
   for /f "usebackq delims=" %%P in (`powershell -NoProfile -ExecutionPolicy Bypass -File "!PS_FALLBACK!" 2^>nul`) do (
     set "CC_SWITCH_PORT=%%P"
     set "HAS_CCSWITCH=1"
@@ -249,18 +229,7 @@ if exist "%CCS_DB%" (
     set "CCS_TMP3_URL=!CCS_TMP3!_url.txt"
     set "CCS_TMP3_KEY=!CCS_TMP3!_key.txt"
     set "PS_DIRECT=%TEMP%\ccs_direct_%RANDOM%%RANDOM%.ps1"
-    > "!PS_DIRECT!" echo try {
-    >> "!PS_DIRECT!" echo   $f = $env:CP_DB_PATH
-    >> "!PS_DIRECT!" echo   $bytes = [IO.File]::ReadAllBytes($f)
-    >> "!PS_DIRECT!" echo   $text = [Text.Encoding]::UTF8.GetString($bytes)
-    >> "!PS_DIRECT!" echo   $m = [regex]::Match($text, '"ANTHROPIC_BASE_URL"\s*:\s*"([^"]+)"')
-    >> "!PS_DIRECT!" echo   $mk = [regex]::Match($text, '"ANTHROPIC_AUTH_TOKEN"\s*:\s*"([^"]+)"')
-    >> "!PS_DIRECT!" echo   if (-not $mk.Success) { $mk = [regex]::Match($text, '"ANTHROPIC_API_KEY"\s*:\s*"([^"]+)"') }
-    >> "!PS_DIRECT!" echo   if ($m.Success -and $mk.Success) {
-    >> "!PS_DIRECT!" echo     [IO.File]::WriteAllText($env:CCS_TMP3_URL, $m.Groups[1].Value)
-    >> "!PS_DIRECT!" echo     [IO.File]::WriteAllText($env:CCS_TMP3_KEY, $mk.Groups[1].Value)
-    >> "!PS_DIRECT!" echo   }
-    >> "!PS_DIRECT!" echo } catch {}
+    call :write_direct_script "!PS_DIRECT!"
     powershell -NoProfile -ExecutionPolicy Bypass -File "!PS_DIRECT!" >nul 2>&1
     del "!PS_DIRECT!" >nul 2>&1
     if exist "!CCS_TMP3_URL!" (
@@ -340,6 +309,67 @@ if exist "%CCS_DB%" (
 )
 pause
 exit /b 0
+
+:: =============================================
+:: Subroutine: write port-detection PS script
+:: %1 = output file path
+:: =============================================
+:write_port_script
+> "%~1" echo try {
+>> "%~1" echo $f = $env:CP_DB_PATH
+>> "%~1" echo $bytes = [IO.File]::ReadAllBytes($f)
+>> "%~1" echo $t = [Text.Encoding]::UTF8.GetString($bytes)
+>> "%~1" echo $m = [regex]::Match($t, 'listen_port.{1,20}?(\d{4,5})')
+>> "%~1" echo if ($m.Success) { Write-Output $m.Groups[1].Value }
+>> "%~1" echo } catch {}
+goto :eof
+
+:: =============================================
+:: Subroutine: write port-scan PS script (for already-running cc-switch)
+:: =============================================
+:write_portscan_script
+> "%~1" echo try {
+>> "%~1" echo   $procs = Get-Process cc-switch -ErrorAction SilentlyContinue
+>> "%~1" echo   if ($procs) {
+>> "%~1" echo     $procIds = $procs.Id
+>> "%~1" echo     $conns = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue ^| Where-Object { $procIds -contains $_.OwningProcess }
+>> "%~1" echo     foreach ($c in ($conns ^| Sort-Object LocalPort)) {
+>> "%~1" echo       try { $tc = New-Object Net.Sockets.TcpClient('127.0.0.1', $c.LocalPort); $tc.Close(); Write-Output $c.LocalPort; break } catch {}
+>> "%~1" echo     }
+>> "%~1" echo   }
+>> "%~1" echo } catch {}
+goto :eof
+
+:: =============================================
+:: Subroutine: write fallback port-scan PS script
+:: =============================================
+:write_fallback_script
+> "%~1" echo $procIds = (Get-Process cc-switch -ErrorAction SilentlyContinue).Id
+>> "%~1" echo if ($procIds) {
+>> "%~1" echo   $conns = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue ^| Where-Object { $procIds -contains $_.OwningProcess }
+>> "%~1" echo   foreach ($c in $conns ^| Sort-Object LocalPort) {
+>> "%~1" echo     try { $tc = New-Object Net.Sockets.TcpClient('127.0.0.1', $c.LocalPort); $tc.Close(); Write-Output $c.LocalPort; break } catch {}
+>> "%~1" echo   }
+>> "%~1" echo }
+goto :eof
+
+:: =============================================
+:: Subroutine: write direct-mode config-extraction PS script
+:: =============================================
+:write_direct_script
+> "%~1" echo try {
+>> "%~1" echo   $f = $env:CP_DB_PATH
+>> "%~1" echo   $bytes = [IO.File]::ReadAllBytes($f)
+>> "%~1" echo   $t = [Text.Encoding]::UTF8.GetString($bytes)
+>> "%~1" echo   $m = [regex]::Match($t, '"ANTHROPIC_BASE_URL"\s*:\s*"([^"]+)"')
+>> "%~1" echo   $mk = [regex]::Match($t, '"ANTHROPIC_AUTH_TOKEN"\s*:\s*"([^"]+)"')
+>> "%~1" echo   if (-not $mk.Success) { $mk = [regex]::Match($t, '"ANTHROPIC_API_KEY"\s*:\s*"([^"]+)"') }
+>> "%~1" echo   if ($m.Success -and $mk.Success) {
+>> "%~1" echo     [IO.File]::WriteAllText($env:CCS_TMP3_URL, $m.Groups[1].Value)
+>> "%~1" echo     [IO.File]::WriteAllText($env:CCS_TMP3_KEY, $mk.Groups[1].Value)
+>> "%~1" echo   }
+>> "%~1" echo } catch {}
+goto :eof
 
 :: =============================================
 :: Subroutine: check if valid provider config exists
