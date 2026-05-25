@@ -34,7 +34,8 @@ if not exist "%FIRST_RUN%" (
   echo.
   echo   1. Open CC Switch GUI (recommended)
   echo   2. Manual API key entry
-  set /p CHOICE="  Choose [1/2]: "
+set /p CHOICE="  Choose [1/2]: "
+  if "!CHOICE!"=="" pause & exit /b 0
   if "!CHOICE!"=="1" (
     echo Opening CC Switch...
     start "" "%BIN_DIR%\cc-switch.exe"
