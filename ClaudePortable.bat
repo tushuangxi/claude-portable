@@ -25,8 +25,11 @@ if exist "%PORTABLE_CCS%\cc-switch.db" (
   if exist "%CCS_DB%" copy /y "%PORTABLE_CCS%\cc-switch.db" "%CCS_DB%" >nul
 )
 
+:: 检查是否已完成配置（直接查 CC Switch 数据库，不依赖 .configured 文件）
+powershell -NoProfile -Command "if (Test-Path (Join-Path $env:USERPROFILE '.cc-switch\cc-switch.db')) { exit 0 } else { exit 1 }" >nul 2>&1
+if !errorlevel! EQU 0 goto :skip_first_run
+
 :: First-run setup
-if not exist "%FIRST_RUN%" (
   echo.
   echo =====================================
   echo   1st Run - Configure API
@@ -46,7 +49,9 @@ set /p CHOICE="  Choose [1/2]: "
       :: 用 PowerShell 创建标记文件（比 type nul 更可靠）
       powershell -NoProfile -Command "if (!(Test-Path '%FIRST_RUN%')) { New-Item '%FIRST_RUN%' -Type File -Force | Out-Null }" >nul 2>&1
       if exist "%FIRST_RUN%" (
-        echo [ok] Provider detected
+echo [ok] Provider detected
+        :: 立即同步数据库到便携包
+        if exist "%CCS_DB%" copy /y "%CCS_DB%" "%PORTABLE_CCS%\cc-switch.db" >nul
       ) else (
         echo [!] Could not save config mark
       )
@@ -56,9 +61,11 @@ set /p CHOICE="  Choose [1/2]: "
         if !errorlevel! EQU 0 (
           powershell -NoProfile -Command "if (!(Test-Path '%FIRST_RUN%')) { New-Item '%FIRST_RUN%' -Type File -Force | Out-Null }" >nul 2>&1
           if exist "%FIRST_RUN%" (
-            echo [ok] Provider detected
-          ) else (
-            echo [!] Could not save config mark
+echo [ok] Provider detected
+        :: 立即同步数据库到便携包
+        if exist "%CCS_DB%" copy /y "%CCS_DB%" "%PORTABLE_CCS%\cc-switch.db" >nul
+      ) else (
+        echo [!] Could not save config mark
           )
         ) else (
           echo [!] No provider found
@@ -76,8 +83,8 @@ set /p CHOICE="  Choose [1/2]: "
   powershell -NoProfile -Command "$c = @{ providers = @( @{ id='custom'; name='Custom API'; type='anthropic'; base_url='%API_BASE%'; api_key='%AKEY%'; enabled=$true } ); active_provider='custom'; proxy_port=15721; auto_start_proxy=$true }; $c | ConvertTo-Json -Depth 3 | Set-Content '%CONFIG_FILE%'" >nul 2>&1
   type nul > "%FIRST_RUN%"
   echo [ok] Config saved
-)
 
+:skip_first_run
 :: Start CC Switch proxy
 set "CC_SWITCH_PORT=15721"
 set "HAS_CCSWITCH=0"
