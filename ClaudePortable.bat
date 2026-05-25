@@ -43,14 +43,23 @@ set /p CHOICE="  Choose [1/2]: "
     pause >nul
     powershell -NoProfile -Command "if (Test-Path (Join-Path $env:USERPROFILE '.cc-switch\cc-switch.db')) { exit 0 } else { exit 1 }" >nul 2>&1
     if !errorlevel! EQU 0 (
-      type nul > "%FIRST_RUN%"
-      echo [ok] Provider detected
+      :: 用 PowerShell 创建标记文件（比 type nul 更可靠）
+      powershell -NoProfile -Command "if (!(Test-Path '%FIRST_RUN%')) { New-Item '%FIRST_RUN%' -Type File -Force | Out-Null }" >nul 2>&1
+      if exist "%FIRST_RUN%" (
+        echo [ok] Provider detected
+      ) else (
+        echo [!] Could not save config mark
+      )
     ) else (
       if exist "%CONFIG_FILE%" (
         for /f "usebackq delims=" %%x in (`powershell -NoProfile -Command "try { $d = Get-Content '%CONFIG_FILE%' -Raw | ConvertFrom-Json; if ($d.providers.Count -gt 0) { exit 0 } else { exit 1 } } catch { exit 1 }"`) do set "dummy=%%x"
         if !errorlevel! EQU 0 (
-          type nul > "%FIRST_RUN%"
-          echo [ok] Provider detected
+          powershell -NoProfile -Command "if (!(Test-Path '%FIRST_RUN%')) { New-Item '%FIRST_RUN%' -Type File -Force | Out-Null }" >nul 2>&1
+          if exist "%FIRST_RUN%" (
+            echo [ok] Provider detected
+          ) else (
+            echo [!] Could not save config mark
+          )
         ) else (
           echo [!] No provider found
         )
