@@ -108,7 +108,7 @@ jobs:
 
           # macOS (universal dmg -> extract app)
           echo "  macOS..."
-          curl -fsSL -o /tmp/ccswitch-mac.tar.gz "$BASE/CC-Switch-${CCS_VER}-macOS.tar.gz" 2>/dev/null || true
+          curl -fsSL -o /tmp/ccswitch-mac.tar.gz "$BASE/CC-Switch-v${CCS_VER}-macOS.tar.gz" 2>/dev/null || true
           if [ -f /tmp/ccswitch-mac.tar.gz ] && [ -s /tmp/ccswitch-mac.tar.gz ]; then
             mkdir -p /tmp/ccswitch-mac
             tar -xzf /tmp/ccswitch-mac.tar.gz -C /tmp/ccswitch-mac 2>/dev/null || true
@@ -124,7 +124,7 @@ jobs:
 
           # Linux x64 (AppImage)
           echo "  Linux..."
-          curl -fsSL -o bin/linux-x64/cc-switch "$BASE/CC-Switch-${CCS_VER}-Linux-x86_64.AppImage" 2>/dev/null || true
+          curl -fsSL -o bin/linux-x64/cc-switch "$BASE/CC-Switch-v${CCS_VER}-Linux-x86_64.AppImage" 2>/dev/null || true
           if [ -f bin/linux-x64/cc-switch ] && [ -s bin/linux-x64/cc-switch ]; then
             chmod +x bin/linux-x64/cc-switch
             echo "    OK: Linux cc-switch (AppImage)"
@@ -134,7 +134,7 @@ jobs:
 
           # Windows (portable zip)
           echo "  Windows..."
-          curl -fsSL -o /tmp/ccswitch-win.zip "$BASE/CC-Switch-${CCS_VER}-Windows-Portable.zip" 2>/dev/null || true
+          curl -fsSL -o /tmp/ccswitch-win.zip "$BASE/CC-Switch-v${CCS_VER}-Windows-Portable.zip" 2>/dev/null || true
           if [ -f /tmp/ccswitch-win.zip ] && [ -s /tmp/ccswitch-win.zip ]; then
             mkdir -p /tmp/ccswitch-win
             unzip -qo /tmp/ccswitch-win.zip -d /tmp/ccswitch-win 2>/dev/null || true
