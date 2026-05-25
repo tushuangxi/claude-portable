@@ -37,17 +37,17 @@ jobs:
             echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
             echo "Version from tag: ${GITHUB_REF#refs/tags/}"
           else
-            # Manual trigger: auto-increment patch from latest tag
+            # Manual trigger: auto-increment patch from latest stable tag
             git fetch --tags
-            LATEST=$(git tag --sort=-v:refname | grep '^v' | head -1)
+            LATEST=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
             if [ -z "$LATEST" ]; then
               NEW_VER="v0.2.0"
             else
               RAW="${LATEST#v}"
-              MAJOR="${RAW%.*.*}"
+              MAJOR="${RAW%%.*}"
               REST="${RAW#*.}"
-              MINOR="${REST%.*}"
-              PATCH="${RAW##*.}"
+              MINOR="${REST%%.*}"
+              PATCH="${REST#*.}"
               PATCH=$((PATCH + 1))
               NEW_VER="v${MAJOR}.${MINOR}.${PATCH}"
             fi
@@ -143,7 +143,7 @@ jobs:
             mkdir -p /tmp/ccswitch-mac
             tar -xzf /tmp/ccswitch-mac.tar.gz -C /tmp/ccswitch-mac 2>/dev/null || true
             # Find the binary inside the .app bundle
-            CCS_BIN=$(find /tmp/ccswitch-mac -name "CC-Switch" -o -name "cc-switch" -type f 2>/dev/null | head -1)
+            CCS_BIN=$(find /tmp/ccswitch-mac \( -name "CC-Switch" -o -name "cc-switch" \) -type f 2>/dev/null | head -1)
             if [ -n "$CCS_BIN" ] && [ -f "$CCS_BIN" ]; then
               cp "$CCS_BIN" bin/macos-arm64/cc-switch
               cp "$CCS_BIN" bin/macos-x64/cc-switch
@@ -168,7 +168,7 @@ jobs:
           if [ -f /tmp/ccswitch-win.zip ] && [ -s /tmp/ccswitch-win.zip ]; then
             mkdir -p /tmp/ccswitch-win
             unzip -qo /tmp/ccswitch-win.zip -d /tmp/ccswitch-win 2>/dev/null || true
-            CCS_EXE=$(find /tmp/ccswitch-win -name "CC-Switch.exe" -o -name "cc-switch.exe" 2>/dev/null | head -1)
+            CCS_EXE=$(find /tmp/ccswitch-win \( -name "CC-Switch.exe" -o -name "cc-switch.exe" \) -type f 2>/dev/null | head -1)
             if [ -n "$CCS_EXE" ] && [ -f "$CCS_EXE" ]; then
               cp "$CCS_EXE" bin/windows-x64/cc-switch.exe
               echo "    OK: Windows cc-switch.exe"
