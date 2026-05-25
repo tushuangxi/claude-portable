@@ -7,6 +7,22 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ARCH="$(uname -m)"
 
+# Banner
+GOLD='\033[38;5;220m'
+AMBER='\033[38;5;214m'
+BRONZE='\033[38;5;166m'
+NC='\033[0m'
+echo ""
+echo -e "${GOLD}  ██╗   ██╗██╗  ██╗   ██╗ ██████╗${NC}"
+echo -e "${GOLD}  ╚██╗ ██╔╝██║  ╚██╗ ██╔╝██╔════╝${NC}"
+echo -e "${AMBER}   ╚████╔╝ ██║   ╚████╔╝ ██║  ███╗${NC}"
+echo -e "${AMBER}    ╚██╔╝  ██║    ╚██╔╝  ██║   ██║${NC}"
+echo -e "${BRONZE}     ██║   ███████╗██║   ╚██████╔╝${NC}"
+echo -e "${BRONZE}     ╚═╝   ╚══════╝╚═╝    ╚═════╝${NC}"
+echo ""
+echo "     Claude Code Portable"
+echo ""
+
 # 检测架构
 if [ "$ARCH" = "arm64" ]; then
     BIN_DIR="$SCRIPT_DIR/bin/macos-arm64"
@@ -385,11 +401,6 @@ fi
 # ═══════════════════════════════════════════
 # 启动 Claude Code
 # ═══════════════════════════════════════════
-echo ""
-echo "╔══════════════════════════════════════════╗"
-echo "║   Claude Code Portable                   ║"
-echo "╚══════════════════════════════════════════╝"
-echo ""
 echo "  架构: $ARCH"
 echo "  模式: $PROXY_MODE"
 echo ""

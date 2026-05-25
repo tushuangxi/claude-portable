@@ -3,6 +3,20 @@ setlocal enabledelayedexpansion
 chcp 65001 >nul 2>&1
 title Claude Code Portable + CC Switch
 
+REM Enable ANSI escape codes (Windows 10+)
+for /F %%a in ('echo prompt $E ^| cmd') do set "ESC=%%a"
+
+echo.
+echo %ESC%[38;5;220m  ██╗   ██╗██╗  ██╗   ██╗ ██████╗%ESC%[0m
+echo %ESC%[38;5;220m  ╚██╗ ██╔╝██║  ╚██╗ ██╔╝██╔════╝%ESC%[0m
+echo %ESC%[38;5;214m   ╚████╔╝ ██║   ╚████╔╝ ██║  ███╗%ESC%[0m
+echo %ESC%[38;5;214m    ╚██╔╝  ██║    ╚██╔╝  ██║   ██║%ESC%[0m
+echo %ESC%[38;5;166m     ██║   ███████╗██║   ╚██████╔╝%ESC%[0m
+echo %ESC%[38;5;166m     ╚═╝   ╚══════╝╚═╝    ╚═════╝%ESC%[0m
+echo.
+echo      Claude Code Portable
+echo.
+
 set "SCRIPT_DIR=%~dp0"
 set "BIN_DIR=%SCRIPT_DIR%bin\windows-x64"
 set "CONFIG_DIR=%SCRIPT_DIR%data\.claude"
@@ -223,11 +237,7 @@ if "!ANTHROPIC_API_KEY!"=="" (
 :: =============================================
 set "PROXY_TEXT=Direct mode"
 if "!HAS_CCSWITCH!"=="1" set "PROXY_TEXT=CC Switch Proxy (port !CC_SWITCH_PORT!)"
-echo.
-echo =====================================
-echo   Claude Code Portable
 echo   Mode: !PROXY_TEXT!
-echo =====================================
 echo.
 set "CLAUDE_CONFIG_DIR=%CONFIG_DIR%"
 set "CLAUDE_HOME=%CONFIG_DIR%"
