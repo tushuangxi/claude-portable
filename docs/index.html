@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Claude Code Portable · 使用说明</title>
+<meta name="description" content="Claude Code Portable · 便携版使用文档">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='18' fill='%23041c1c'/%3E%3Cg fill='none' stroke='%23ffe6cb' stroke-width='4.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M 28 32 L 42 60 M 56 32 L 42 60 L 36 78'/%3E%3Cpath d='M 64 32 L 64 60 Q 64 72 76 72 L 76 32'/%3E%3C/g%3E%3C/svg%3E">
+<meta name="theme-color" content="#041c1c" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f5f0e8" media="(prefers-color-scheme: light)">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+ --bg:#041c1c;--mid:#ffe6cb;--dim:#5a7770;--accent:#00ffc8;
+ --border:rgba(255,230,203,0.12);
+ --sans:system-ui,-apple-system,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;
+ --serif:Georgia,'Noto Serif SC','Source Han Serif SC',serif;
+ --mono:'Courier New','Menlo',monospace
+}
+[data-theme="light"]{--bg:#f5f0e8;--mid:#3d3a35;--dim:#736e63;--accent:#02966a;--border:rgba(61,58,53,0.14)}
+@media(prefers-color-scheme:light){:root:not([data-theme="dark"]){--bg:#f5f0e8;--mid:#3d3a35;--dim:#736e63;--accent:#02966a;--border:rgba(61,58,53,0.14)}}
+
+html{scroll-behavior:smooth;scroll-padding-top:24px}
+body{font-family:var(--sans);background:var(--bg);color:var(--mid);line-height:1.75;-webkit-font-smoothing:antialiased;font-size:15px}
+::selection{background:var(--accent);color:var(--bg)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+
+.bg-n{position:fixed;inset:0;z-index:0;pointer-events:none;mix-blend-mode:color-dodge;opacity:.03;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' fill='%23eaeaea' filter='url(%23n)' opacity='.6'/%3E%3C/svg%3E");background-size:512px 512px}
+.bg-g{position:fixed;inset:0;z-index:300;pointer-events:none;mix-blend-mode:lighten;opacity:.15;background:radial-gradient(ellipse at 0% 0%,rgba(255,189,56,.25) 0%,transparent 50%)}
+[data-theme="light"] .bg-n{opacity:.015}
+[data-theme="light"] .bg-g{opacity:.06}
+@media(prefers-color-scheme:light){:root:not([data-theme="dark"]) .bg-n{opacity:.015}:root:not([data-theme="dark"]) .bg-g{opacity:.06}}
+
+.label{font-family:var(--sans);font-size:.9375rem;letter-spacing:.1875rem;text-transform:uppercase}
+.label-xs{font-size:.625rem;letter-spacing:.125rem;text-transform:uppercase}
+.display{font-family:var(--serif);font-size:3.5rem;font-weight:700;line-height:1.1;letter-spacing:-.02em}
+.sub{font-size:1.125rem;line-height:1.6;opacity:.6}
+.op-5{opacity:.5}.op-7{opacity:.7}
+
+@keyframes blink{0%,50%{opacity:1}51%,100%{opacity:0}}
+.blink{display:inline-block;width:1ch;height:1.1em;background:currentColor;vertical-align:text-bottom;animation:blink 1.2s step-end infinite}
+
+.theme-toggle{background:none;border:none;cursor:pointer;color:var(--mid);opacity:.5;padding:8px;line-height:0;transition:opacity .2s;display:flex;align-items:center;border-radius:4px}
+.theme-toggle:hover{opacity:1}
+
+.page{position:relative;z-index:200;max-width:1100px;margin:0 auto;padding:0;overflow-x:hidden}
+
+.row{display:grid;grid-template-columns:1fr;border-top:1px solid var(--border);border-left:1px solid var(--border)}
+.cell{padding:16px;border-right:1px solid var(--border);min-width:0;display:flex;align-items:center}
+.cell.s6{grid-column:1/-1}
+@media(min-width:1024px){.row.nav-row{grid-template-columns:1fr 2fr 1fr 1fr 1fr}}
+
+.nav-link{position:relative;display:flex;align-items:center;width:100%;height:100%;color:inherit;cursor:pointer;background:none;border:none;text-align:left;padding:16px;font:inherit;letter-spacing:inherit;text-decoration:none}
+.nav-link .blink{display:none}
+.nav-link:hover .blink{display:inline-block}
+.nav-link::before{content:"";position:absolute;inset:-12px;background:var(--mid);pointer-events:none;opacity:0;transition:opacity .25s;z-index:-1}
+.nav-link:hover::before{opacity:.05}
+
+.hero{text-align:center;display:flex;flex-direction:column;align-items:center;gap:20px;padding:64px 20px 48px;width:100%}
+
+.term{width:100%;max-width:560px;border:4px double var(--border)}
+.term-h{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--border)}
+.td{width:10px;height:10px;border-radius:50%}
+.td:nth-child(1){background:var(--mid)}.td:nth-child(2){background:var(--mid);opacity:.6}.td:nth-child(3){background:var(--mid);opacity:.3}
+.term-label{margin-left:auto;font-family:var(--mono);font-size:.625rem;letter-spacing:.1875rem;opacity:.5}
+.term-b{font-family:var(--mono);font-size:.78rem;line-height:1.85;padding:18px 16px;white-space:pre-wrap;min-height:140px;word-break:break-word;text-align:left}
+.term-b .p{color:var(--accent)}
+.term-b .t{opacity:.6}
+
+.doc{padding:40px 32px 80px;max-width:880px;margin:0 auto;position:relative;z-index:200}
+.doc h2{font-family:var(--serif);font-weight:700;font-size:1.7rem;margin:56px 0 16px;padding-top:24px;border-top:1px solid var(--border);line-height:1.25}
+.doc h3{font-family:var(--serif);font-weight:700;font-size:1.25rem;margin:32px 0 12px;line-height:1.25}
+.doc p{margin:12px 0;opacity:.8;line-height:1.75}
+.doc strong{opacity:1;font-weight:600}
+.doc ul,.doc ol{margin:12px 0 12px 1.5em;opacity:.8}
+.doc li{margin:6px 0;line-height:1.7}
+.doc code{font-family:var(--mono);font-size:.88em;background:rgba(255,230,203,0.06);border:1px solid var(--border);padding:2px 6px;border-radius:3px;color:var(--accent)}
+.doc pre{font-family:var(--mono);font-size:.82rem;line-height:1.6;background:rgba(0,0,0,0.25);border:1px solid var(--border);border-radius:4px;padding:14px 16px;margin:16px 0;overflow-x:auto;opacity:.92}
+.doc pre code{background:none;border:none;padding:0;color:inherit;font-size:1em}
+.doc table{width:100%;border-collapse:collapse;margin:16px 0;font-size:.92rem}
+.doc th,.doc td{padding:10px 14px;border:1px solid var(--border);text-align:left}
+.doc th{background:rgba(255,230,203,0.04);font-family:var(--serif);font-weight:600}
+.doc td{opacity:.85}
+.doc blockquote{margin:16px 0;padding:8px 16px;border-left:3px solid var(--accent);background:rgba(0,255,200,0.04);opacity:.85}
+.doc .platform-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin:16px 0}
+.doc .card{display:flex;flex-direction:column;align-items:flex-start;gap:8px;padding:18px;border:1px solid var(--border);border-radius:4px;background:rgba(255,230,203,0.02);transition:border-color .2s}
+.doc .card:hover{border-color:var(--accent)}
+.doc .card strong{font-family:var(--serif);font-size:1.05rem}
+.doc .card span{font-size:.88rem;opacity:.7;line-height:1.5}
+[data-theme="light"] .doc code{background:rgba(61,58,53,0.06)}
+[data-theme="light"] .doc pre{background:rgba(255,255,255,0.5)}
+
+.footer{display:grid;grid-template-columns:1fr;border-top:1px solid var(--border);border-left:1px solid var(--border);border-bottom:1px solid var(--border)}
+.footer .c{padding:16px;border-right:1px solid var(--border);display:flex;align-items:center}
+@media(min-width:1024px){.footer{grid-template-columns:1fr 1fr 1fr 1fr 1fr}}
+
+@media(max-width:1023px){
+ .row,.row.nav-row{grid-template-columns:1fr;border-left:none}
+ .cell{border-right:none}
+ .footer{grid-template-columns:1fr;border-left:none}
+ .footer .c{border-right:none}
+ .doc{padding:32px 20px 60px}
+}
+@media(max-width:640px){
+ .display{font-size:2rem}.sub{font-size:.95rem}.hero{padding:40px 16px 32px}
+ .term-b{font-size:.7rem;padding:14px 12px}
+ .doc{padding:24px 16px 40px}
+ .doc h2{font-size:1.4rem}.doc h3{font-size:1.15rem}
+ .doc pre{font-size:.74rem;padding:12px 14px}
+ .doc table{font-size:.82rem}
+}
+</style>
+</head>
+<body>
+
+<div class="bg-n" aria-hidden="true"></div>
+<div class="bg-g" aria-hidden="true"></div>
+
+<div class="page">
+
+<nav class="row nav-row" aria-label="Primary">
+ <div class="cell" style="font-family:var(--serif);font-size:1.2rem;font-weight:700"><a href="https://yuai-r.cn/" style="text-decoration:none;color:inherit">yu.ai</a></div>
+ <div class="cell" style="padding:0"><a class="nav-link" href="https://yuai-r.cn/"><span class="label">home <span class="blink"></span></span></a></div>
+ <div class="cell" style="padding:0"><a class="nav-link" href="https://yuai-r.cn/hermes/"><span class="label">hermes <span class="blink"></span></span></a></div>
+ <div class="cell" style="padding:0"><a class="nav-link" href="https://yuai-r.cn/claude/" style="color:var(--accent)"><span class="label">claude <span class="blink"></span></span></a></div>
+ <div class="cell" style="justify-content:space-between">
+  <span class="label op-5">theme</span>
+  <button id="theme-btn" aria-label="Toggle theme" class="theme-toggle"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg></button>
+ </div>
+</nav>
+
+<div class="row">
+ <div class="cell s6" style="border-right:none;padding:0">
+ <div class="hero">
+  <span class="label-xs op-7" style="letter-spacing:.15rem">claude code · portable</span>
+  <h1 class="display">Claude Code Portable</h1>
+  <p class="sub">便携版 Claude Code + CC Switch · 零安装，即插即用</p>
+  <div class="term" aria-hidden="true">
+  <div class="term-h">
+   <span class="td"></span><span class="td"></span><span class="td"></span>
+   <span class="term-label">terminal</span>
+  </div>
+  <div class="term-b"><span class="p">$</span> <span class="t">./ClaudePortable.command</span>
+<span class="t" style="color:var(--accent)">  ██╗   ██╗██╗  ██╗   ██╗ ██████╗</span>
+<span class="t" style="color:var(--accent)">   ╚████╔╝ ██║   ╚████╔╝ ██║  ███╗</span>
+<span class="t" style="opacity:.5">     Claude Code Portable</span>
+<span class="t" style="opacity:.5">  Mode: CC Switch Proxy (port 15721)</span>
+<span class="p">></span><span class="blink"></span></div>
+  </div>
+ </div>
+ </div>
+</div>
+
+<main class="doc">
+
+<h2>快速开始</h2>
+
+<div class="platform-grid">
+ <div class="card"><strong>🍎 macOS</strong><span>双击 <code>ClaudePortable.command</code></span></div>
+ <div class="card"><strong>🐧 Linux</strong><span><code>chmod +x ClaudePortable.sh && ./ClaudePortable.sh</code></span></div>
+ <div class="card"><strong>🪟 Windows</strong><span>双击 <code>ClaudePortable.bat</code></span></div>
+</div>
+
+<p>首次运行会自动引导你配置 API。推荐选择 <strong>CC Switch 图形界面</strong>（选项 1），添加 Provider 后关闭窗口即可。</p>
+
+<h2>工作原理</h2>
+
+<p>启动脚本做了三件事：</p>
+<ol>
+ <li><strong>启动 CC Switch 代理</strong> — 在本地监听端口，转发 API 请求到你配置的 Provider</li>
+ <li><strong>设置环境变量</strong> — 让 Claude Code 通过本地代理连接</li>
+ <li><strong>启动 Claude Code</strong> — 进入交互式 CLI</li>
+</ol>
+
+<blockquote>CC Switch 支持多 Provider 切换、负载均衡、故障转移。你可以随时打开 CC Switch 修改配置。</blockquote>
+
+<h2>目录结构</h2>
+
+<pre><code>ClaudeCodePortable/
+├── bin/                    # 各平台二进制文件
+│   ├── macos-arm64/        # Apple Silicon
+│   ├── macos-x64/          # Intel Mac
+│   ├── linux-x64/          # Linux x86_64
+│   └── windows-x64/        # Windows 64-bit
+├── config/                 # 配置文件
+│   ├── claude/             # Claude Code 权限配置
+│   └── ccswitch/           # CC Switch 备用配置
+├── data/                   # 运行时数据（会话、DB）
+├── ClaudePortable.command  # macOS 启动脚本
+├── ClaudePortable.sh       # Linux 启动脚本
+└── ClaudePortable.bat      # Windows 启动脚本</code></pre>
+
+<h2>配置 API</h2>
+
+<h3>方式一：CC Switch GUI（推荐）</h3>
+<p>首次运行选择 <code>1</code>，或直接运行 <code>bin/</code> 目录下的 <code>cc-switch</code> 可执行文件。在图形界面中添加你的 API Provider：</p>
+<ul>
+ <li>填写 Base URL（如 <code>https://api.anthropic.com</code> 或第三方兼容端点）</li>
+ <li>填写 API Key</li>
+ <li>保存后关闭 CC Switch</li>
+</ul>
+
+<h3>方式二：命令行快速配置</h3>
+<p>首次运行选择 <code>2</code>，按提示输入 Base URL 和 API Key。配置保存在 <code>config/ccswitch/providers.json</code>。</p>
+
+<h2>环境变量</h2>
+
+<table>
+ <tr><th>变量</th><th>说明</th></tr>
+ <tr><td><code>ANTHROPIC_BASE_URL</code></td><td>API 端点（代理模式自动设置）</td></tr>
+ <tr><td><code>ANTHROPIC_API_KEY</code></td><td>API Key（代理模式自动设置）</td></tr>
+ <tr><td><code>CLAUDE_CONFIG_DIR</code></td><td>Claude 配置目录（指向 data/.claude）</td></tr>
+ <tr><td><code>CLAUDE_HOME</code></td><td>Claude 主目录（指向 data/.claude）</td></tr>
+</table>
+
+<h2>便携性</h2>
+
+<p>所有数据存储在 <code>data/</code> 目录内，不污染系统 HOME 目录。你可以：</p>
+<ul>
+ <li>把整个文件夹复制到 U 盘，在不同电脑间使用</li>
+ <li>CC Switch 配置会自动在便携包和系统之间同步</li>
+ <li>会话历史跟随便携包移动</li>
+</ul>
+
+<h2>常见问题</h2>
+
+<h3>macOS 提示"无法打开，因为无法验证开发者"</h3>
+<p>启动脚本会自动移除 quarantine 属性。如果仍然被拦截，手动执行：</p>
+<pre><code>xattr -dr com.apple.quarantine /path/to/ClaudeCodePortable</code></pre>
+
+<h3>CC Switch 代理未就绪</h3>
+<p>脚本会自动回退到直连模式，从 DB 或 providers.json 读取配置直接连接 API。功能不受影响。</p>
+
+<h3>更新 Claude Code</h3>
+<p>替换 <code>bin/</code> 目录下对应平台的二进制文件即可。配置和数据不受影响。</p>
+
+<h3>Windows 上首次运行检测不到配置</h3>
+<p>确保使用 Release 页面下载的 zip 包（包含 sqlite3.exe）。如果是从源码运行，脚本会通过文件大小检测兜底。</p>
+
+</main>
+
+<footer class="footer">
+ <div class="c"><span class="label op-7">yu.ai</span></div>
+ <div class="c"><a class="label" href="https://yuai-r.cn/" style="opacity:.7">home ↗</a></div>
+ <div class="c"><a class="label" href="https://yuai-r.cn/hermes/" style="opacity:.7">hermes ↗</a></div>
+ <div class="c"><a class="label" href="https://github.com/yuluyangguang1" target="_blank" rel="noopener" style="opacity:.7">github ↗</a></div>
+ <div class="c"><span class="label op-5" id="footer-year" style="color:var(--accent)">claude-portable</span></div>
+</footer>
+
+</div>
+
+<script>
+(function(){
+ var btn=document.getElementById('theme-btn');
+ if(!btn)return;
+ var html=document.documentElement;
+ var saved=localStorage.getItem('yuai-theme');
+ if(saved==='light')html.setAttribute('data-theme','light');
+ else if(saved==='dark')html.setAttribute('data-theme','dark');
+ btn.onclick=function(){
+  var isLight=html.getAttribute('data-theme')!=='light';
+  if(!html.getAttribute('data-theme')){isLight=!(window.matchMedia&&window.matchMedia('(prefers-color-scheme:light)').matches);}
+  html.setAttribute('data-theme',isLight?'light':'dark');
+  localStorage.setItem('yuai-theme',isLight?'light':'dark');
+ };
+ var fy=document.getElementById('footer-year');
+ if(fy)fy.textContent='claude-portable · '+new Date().getFullYear();
+})();
+</script>
+
+</body>
+</html>
