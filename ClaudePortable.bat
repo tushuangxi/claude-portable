@@ -35,27 +35,7 @@ if exist "%PORTABLE_CCS%\cc-switch.db" (
 :: =============================================
 :: Check if valid config exists (DB or JSON)
 :: =============================================
-set "HAS_CONFIG=0"
-
-:: Check DB via sqlite3.exe (bundled)
-if exist "%CCS_DB%" (
-  if exist "%BIN_DIR%\sqlite3.exe" (
-    for /f "usebackq delims=" %%N in (`"%BIN_DIR%\sqlite3.exe" "%CCS_DB%" "SELECT COUNT(*) FROM providers WHERE app_type='claude'" 2^>nul`) do (
-      echo(%%N| findstr /r "^[0-9][0-9]*$" >nul 2>&1
-      if !errorlevel! EQU 0 if %%N GTR 0 set "HAS_CONFIG=1"
-    )
-  )
-)
-
-:: Check providers.json as fallback
-if "!HAS_CONFIG!"=="0" (
-  if exist "%CONFIG_FILE%" (
-    set "CP_CHK_FILE=%CONFIG_FILE%"
-    powershell -NoProfile -Command "try { $d = Get-Content $env:CP_CHK_FILE -Raw | ConvertFrom-Json; foreach ($p in $d.providers) { if ($p.enabled -and $p.base_url -and $p.api_key) { exit 0 } }; exit 1 } catch { exit 1 }" >nul 2>&1
-    if !errorlevel! EQU 0 set "HAS_CONFIG=1"
-  )
-)
-
+call :check_has_provider
 if "!HAS_CONFIG!"=="1" goto :skip_first_run
 
 :: =============================================
@@ -75,22 +55,20 @@ goto :first_run_manual
 
 :first_run_gui
 echo Opening CC Switch...
+echo   (Configure your provider in CC Switch, then close it)
+echo.
 start /wait "" "%BIN_DIR%\cc-switch.exe"
 :: If start /wait returned immediately (Electron app), wait for user
-if not exist "%CCS_DB%" (
-  echo   If CC Switch is still open, configure it then press any key...
+timeout /t 2 >nul 2>&1
+tasklist /fi "ImageName eq cc-switch.exe" 2>nul | find /i "cc-switch" >nul
+if !errorlevel! EQU 0 (
+  echo   CC Switch is still running. Press any key after you finish configuring...
   pause >nul
+  :: Give CC Switch time to flush DB
+  timeout /t 2 >nul 2>&1
 )
 :: Re-check after GUI closes
-set "HAS_CONFIG=0"
-if exist "%CCS_DB%" (
-  if exist "%BIN_DIR%\sqlite3.exe" (
-    for /f "usebackq delims=" %%N in (`"%BIN_DIR%\sqlite3.exe" "%CCS_DB%" "SELECT COUNT(*) FROM providers WHERE app_type='claude'" 2^>nul`) do (
-      echo(%%N| findstr /r "^[0-9][0-9]*$" >nul 2>&1
-      if !errorlevel! EQU 0 if %%N GTR 0 set "HAS_CONFIG=1"
-    )
-  )
-)
+call :check_has_provider
 if "!HAS_CONFIG!"=="1" (
   echo [ok] Provider detected
   if exist "%CCS_DB%" copy /y "%CCS_DB%" "%PORTABLE_CCS%\cc-switch.db" >nul
@@ -274,3 +252,46 @@ if exist "%CCS_DB%" (
 )
 pause
 exit /b 0
+
+:: =============================================
+:: Subroutine: check if valid provider config exists
+:: Sets HAS_CONFIG=1 if found, 0 otherwise
+:: =============================================
+:check_has_provider
+set "HAS_CONFIG=0"
+
+:: Method 1: sqlite3.exe (bundled by CI)
+if exist "%CCS_DB%" (
+  if exist "%BIN_DIR%\sqlite3.exe" (
+    for /f "usebackq delims=" %%N in (`"%BIN_DIR%\sqlite3.exe" "%CCS_DB%" "SELECT COUNT(*) FROM providers WHERE app_type='claude'" 2^>nul`) do (
+      echo(%%N| findstr /r "^[0-9][0-9]*$" >nul 2>&1
+      if !errorlevel! EQU 0 if %%N GTR 0 set "HAS_CONFIG=1"
+    )
+  )
+)
+
+:: Method 2: PowerShell reads DB (no sqlite3.exe needed)
+if "!HAS_CONFIG!"=="0" (
+  if exist "%CCS_DB%" (
+    set "CP_DB_PATH=%CCS_DB%"
+    powershell -NoProfile -Command "try { Add-Type -AssemblyName System.Data; $c = New-Object System.Data.SQLite.SQLiteConnection('Data Source=' + $env:CP_DB_PATH); $c.Open(); $cmd = $c.CreateCommand(); $cmd.CommandText = 'SELECT COUNT(*) FROM providers WHERE app_type=''claude'''; [int]$n = $cmd.ExecuteScalar(); $c.Close(); if ($n -gt 0) { exit 0 } else { exit 1 } } catch { try { $bytes = [IO.File]::ReadAllBytes($env:CP_DB_PATH); if ($bytes.Length -gt 100) { exit 0 } else { exit 1 } } catch { exit 1 } }" >nul 2>&1
+    if !errorlevel! EQU 0 set "HAS_CONFIG=1"
+  )
+)
+
+:: Method 3: DB file exists and is non-empty (last resort)
+if "!HAS_CONFIG!"=="0" (
+  if exist "%CCS_DB%" (
+    for %%F in ("%CCS_DB%") do if %%~zF GTR 1024 set "HAS_CONFIG=1"
+  )
+)
+
+:: Method 4: providers.json has valid entries
+if "!HAS_CONFIG!"=="0" (
+  if exist "%CONFIG_FILE%" (
+    set "CP_CHK_FILE=%CONFIG_FILE%"
+    powershell -NoProfile -Command "try { $d = Get-Content $env:CP_CHK_FILE -Raw | ConvertFrom-Json; foreach ($p in $d.providers) { if ($p.enabled -and $p.base_url -and $p.api_key) { exit 0 } }; exit 1 } catch { exit 1 }" >nul 2>&1
+    if !errorlevel! EQU 0 set "HAS_CONFIG=1"
+  )
+)
+goto :eof
