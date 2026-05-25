@@ -204,6 +204,8 @@ jobs:
           cp -a config/ "$STAGE/config/"
           mkdir -p "$STAGE/data"
           cp ClaudePortable.command ClaudePortable.sh ClaudePortable.bat "$STAGE/"
+          # Normalize .bat to CRLF for Windows cmd.exe compatibility
+          sed -i 's/\r*$/\r/' "$STAGE/ClaudePortable.bat"
           cp ClaudePortable使用说明.html "$STAGE/" 2>/dev/null || true
           cp README.md "$STAGE/"
           cp .gitignore "$STAGE/" 2>/dev/null || true
