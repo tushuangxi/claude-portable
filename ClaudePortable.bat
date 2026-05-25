@@ -70,11 +70,16 @@ if exist "%SYS_CCS%\cc-switch.db" (
   )
 )
 if exist "%SYS_CLAUDE%" (
-  if not exist "%PORTABLE_CLAUDE%\settings.json" (
-    if not exist "%PORTABLE_CLAUDE%\.claude.json" (
-      echo   [migrate] Copying existing claude data into portable folder...
-      xcopy /e /i /y /q "%SYS_CLAUDE%" "%PORTABLE_CLAUDE%" >nul 2>&1
-    )
+  :: Migrate if portable .claude is empty (no files at all)
+  set "PORTABLE_CLAUDE_HAS_FILES=0"
+  for /f %%C in ('dir /b /a-d "%PORTABLE_CLAUDE%" 2^>nul ^| find /c /v ""') do set "PORTABLE_CLAUDE_HAS_FILES=%%C"
+  if "!PORTABLE_CLAUDE_HAS_FILES!"=="0" (
+    :: Also check for subdirectories
+    for /f %%C in ('dir /b /ad "%PORTABLE_CLAUDE%" 2^>nul ^| find /c /v ""') do set "PORTABLE_CLAUDE_HAS_FILES=%%C"
+  )
+  if "!PORTABLE_CLAUDE_HAS_FILES!"=="0" (
+    echo   [migrate] Copying existing claude data into portable folder...
+    xcopy /e /i /y /q "%SYS_CLAUDE%" "%PORTABLE_CLAUDE%" >nul 2>&1
   )
 )
 

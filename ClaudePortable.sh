@@ -84,9 +84,15 @@ WE_STARTED_CCS=0
 # 退出时清理符号链接
 cleanup() {
     if [ "$WE_STARTED_CCS" = "1" ] && [ -n "$CC_SWITCH_PID" ] && kill -0 "$CC_SWITCH_PID" 2>/dev/null; then
-        kill "$CC_SWITCH_PID" 2>/dev/null
-        sleep 0.5
-        kill -0 "$CC_SWITCH_PID" 2>/dev/null && kill -9 "$CC_SWITCH_PID" 2>/dev/null
+        kill -TERM "-$CC_SWITCH_PID" 2>/dev/null || kill "$CC_SWITCH_PID" 2>/dev/null
+        for _ in 1 2 3 4 5; do
+            kill -0 "$CC_SWITCH_PID" 2>/dev/null || break
+            sleep 1
+        done
+        if kill -0 "$CC_SWITCH_PID" 2>/dev/null; then
+            kill -9 "-$CC_SWITCH_PID" 2>/dev/null || kill -9 "$CC_SWITCH_PID" 2>/dev/null
+        fi
+        pkill -f "[Cc][Cc].?[Ss]witch" 2>/dev/null
     fi
     [ -L "$SYS_CCS" ] && rm "$SYS_CCS" 2>/dev/null
     [ -L "$SYS_CLAUDE" ] && rm "$SYS_CLAUDE" 2>/dev/null
@@ -162,8 +168,9 @@ read_config() {
         echo "  [!] 需要 python3 读取配置"
         return 1
     fi
-    local result
-    result=$(CCS_DB="$CCS_DB" python3 - <<'PYEOF' 2>/dev/null
+    local result attempt
+    for attempt in 1 2 3; do
+        result=$(CCS_DB="$CCS_DB" python3 - <<'PYEOF' 2>/dev/null
 import sqlite3, json, os, sys
 try:
     db = sqlite3.connect(os.environ['CCS_DB'])
@@ -181,13 +188,15 @@ except Exception:
     pass
 PYEOF
 )
-    if [ -z "$result" ]; then
-        return 1
-    fi
-    export ANTHROPIC_BASE_URL=$(echo "$result" | head -1)
-    export ANTHROPIC_AUTH_TOKEN=$(echo "$result" | tail -1)
-    unset ANTHROPIC_API_KEY
-    return 0
+        if [ -n "$result" ]; then
+            export ANTHROPIC_BASE_URL=$(echo "$result" | head -1)
+            export ANTHROPIC_AUTH_TOKEN=$(echo "$result" | tail -1)
+            unset ANTHROPIC_API_KEY
+            return 0
+        fi
+        sleep 1
+    done
+    return 1
 }
 
 if read_config; then
