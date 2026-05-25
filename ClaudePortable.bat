@@ -169,18 +169,15 @@ if not exist "%LINK%" (
   mklink /J "%LINK%" "%TARGET%" >nul 2>&1
   if !errorlevel! EQU 0 (exit /b 0) else (exit /b 1)
 )
-:: Check if LINK is already a junction (reparse point)
-dir /al "%LINK%\.." 2>nul | findstr /i /c:"<JUNCTION>" | findstr /i /c:"%~n1" >nul 2>&1
+:: Check if LINK is already a reparse point (junction or symlink)
+fsutil reparsepoint query "%LINK%" >nul 2>&1
 if !errorlevel! EQU 0 (
   :: Already a junction — assume it points correctly (idempotent)
   exit /b 0
 )
 :: It's a real directory. We already migrated content above, so remove and re-link.
-:: Use rd (rmdir) — it removes empty dirs after migration. If not empty, fail safely.
 rd "%LINK%" 2>nul
 if exist "%LINK%" (
-  :: Real dir with content (migration may have failed). Force-delete only if empty
-  :: of unique data — but we already xcopy'd everything, so this should be safe.
   rd /s /q "%LINK%" 2>nul
 )
 mklink /J "%LINK%" "%TARGET%" >nul 2>&1
