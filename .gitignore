@@ -1,17 +1,20 @@
-# Platform binaries — too large for git (1.1GB total)
-# Distributed via GitHub Releases instead
+# Platform binaries
 bin/
 
 # macOS
 .DS_Store
 
-# Session data (user-specific)
+# Session data
 data/.claude/
 data/**/*.jsonl
 data/**/*.jsonl.gz
 
+# Portable DB (auto-generated, user-specific)
+data/cc-switch/
+
 # Temp
 *.tmp
+*.swp
 *.swp
 
 # Dev artifacts
