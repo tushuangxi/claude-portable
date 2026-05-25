@@ -138,20 +138,30 @@ if exist "%CCS_DB%" (
   )
 )
 
-:: Check if already running
+:: Check if already running, and if so, find its actual listening port
 tasklist /fi "ImageName eq cc-switch.exe" 2>nul | find /i "cc-switch" >nul
 if !errorlevel! EQU 0 (
   echo   CC Switch [already running]
+  :: Find the actual port cc-switch is listening on (port from DB may be wrong)
+  for /f "usebackq delims=" %%P in (`powershell -NoProfile -Command "try { $procs = Get-Process cc-switch -ErrorAction SilentlyContinue; if ($procs) { $pids = $procs.Id; $conns = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue ^| Where-Object { $pids -contains $_.OwningProcess -and $_.LocalAddress -match '127.0.0.1^|::1^|0.0.0.0' }; if ($conns) { ($conns ^| Sort-Object LocalPort ^| Select-Object -First 1).LocalPort } } } catch {}" 2^>nul`) do (
+    set "DETECTED_PORT=%%P"
+  )
+  if defined DETECTED_PORT (
+    set "CC_SWITCH_PORT=!DETECTED_PORT!"
+    echo   Detected proxy port: !CC_SWITCH_PORT!
+  )
 ) else (
   echo   Starting CC Switch... port !CC_SWITCH_PORT!
   start "" "%BIN_DIR%\cc-switch.exe"
   set "WE_STARTED_CCS=1"
 )
 
-:: Wait for proxy to be ready
+:: Wait for proxy to be ready (short wait if already running, longer if we just started it)
 set "TRIES=0"
+set "MAX_TRIES=30"
+if "!WE_STARTED_CCS!"=="0" set "MAX_TRIES=3"
 :wp_loop
-if !TRIES! GEQ 30 goto :wp_done
+if !TRIES! GEQ !MAX_TRIES! goto :wp_done
 timeout /t 1 >nul 2>&1
 set /a TRIES+=1
 powershell -NoProfile -Command "try { $c = New-Object Net.Sockets.TcpClient('127.0.0.1', !CC_SWITCH_PORT!); $c.Close(); exit 0 } catch { exit 1 }" >nul 2>&1
@@ -161,6 +171,15 @@ if !errorlevel! EQU 0 (
 )
 goto :wp_loop
 :wp_done
+
+:: If port from DB didn't work, scan common cc-switch ports
+if "!HAS_CCSWITCH!"=="0" (
+  for /f "usebackq delims=" %%P in (`powershell -NoProfile -Command "$pids = (Get-Process cc-switch -ErrorAction SilentlyContinue).Id; if ($pids) { $conns = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue ^| Where-Object { $pids -contains $_.OwningProcess }; foreach ($c in $conns ^| Sort-Object LocalPort) { try { $tc = New-Object Net.Sockets.TcpClient('127.0.0.1', $c.LocalPort); $tc.Close(); Write-Output $c.LocalPort; break } catch {} } }" 2^>nul`) do (
+    set "CC_SWITCH_PORT=%%P"
+    set "HAS_CCSWITCH=1"
+    echo   Found proxy on port %%P
+  )
+)
 
 :no_ccswitch
 if "!HAS_CCSWITCH!"=="1" (
