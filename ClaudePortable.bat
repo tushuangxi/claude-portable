@@ -21,7 +21,7 @@ if not exist "%PORTABLE_CCS%" mkdir "%PORTABLE_CCS%"
 
 :: Sync DB from portable to home
 if exist "%PORTABLE_CCS%\cc-switch.db" (
-  if not exist "%CCS_DB%" mkdir "%CCS_DB%"
+  for %%F in ("%CCS_DB%") do if not exist "%%~dpF" mkdir "%%~dpF"
   if exist "%CCS_DB%" copy /y "%PORTABLE_CCS%\cc-switch.db" "%CCS_DB%" >nul
 )
 
@@ -109,14 +109,14 @@ if exist "%CCS_DB%" (
     for /f "usebackq tokens=1,2 delims=|" %%A in (`""%BIN_DIR%\sqlite3.exe" "%CCS_DB%" "SELECT settings_config FROM providers WHERE app_type='claude' AND is_current=1 LIMIT 1"" 2^>nul`) do (
       for /f "usebackq delims=" %%X in (`powershell -NoProfile -Command "try { $cfg = '%%A' | ConvertFrom-Json; $env = $cfg.env; Write-Output $env.ANTHROPIC_BASE_URL; Write-Output $env.ANTHROPIC_AUTH_TOKEN } catch { }"`) do (
         if not defined ANTHROPIC_BASE_URL ( set "ANTHROPIC_BASE_URL=%%X"
-        ) else ( set "ANTHROPIC_API_KEY=*** & set "ANTHROPIC_AUTH_TOKEN=*** )
+        ) else ( set "ANTHROPIC_API_KEY=%%X & set "ANTHROPIC_AUTH_TOKEN=%%X )
       )
     )
   ) else (
     :: sqlite3.exe 不可用，尝试 PowerShell System.Data.SQLite
     for /f "usebackq delims=" %%A in (`powershell -NoProfile -Command "try { Add-Type -ErrorAction Stop; $c = [System.Data.SQLite.SQLiteConnection]::new('Data Source=%CCS_DB%'); $c.Open(); $cmd = $c.CreateCommand(); $cmd.CommandText = 'SELECT settings_config FROM providers WHERE app_type=''claude'' AND is_current=1 LIMIT 1'; $r = $cmd.ExecuteScalar(); $c.Close(); if ($r) { $cfg = $r | ConvertFrom-Json; $env = $cfg.env; Write-Output $env.ANTHROPIC_BASE_URL; Write-Output $env.ANTHROPIC_AUTH_TOKEN } } catch { }" 2^>nul`) do (
       if not defined ANTHROPIC_BASE_URL ( set "ANTHROPIC_BASE_URL=%%A"
-      ) else ( set "ANTHROPIC_API_KEY=*** & set "ANTHROPIC_AUTH_TOKEN=*** )
+      ) else ( set "ANTHROPIC_API_KEY=%%A & set "ANTHROPIC_AUTH_TOKEN=%%A )
     )
   )
 )
@@ -137,8 +137,8 @@ if not defined ANTHROPIC_API_KEY (
 )
 
 :run_claude
-set "PROXY_TEXT=***
-if "!HAS_CCSWITCH!"=="1" set "PROXY_TEXT=***
+set "PROXY_TEXT=Direct mode"
+if "!HAS_CCSWITCH!"=="1" set "PROXY_TEXT=CC Switch Proxy (port !CC_SWITCH_PORT!)"
 echo Claude Code Portable - Mode: !PROXY_TEXT!
 set "CLAUDE_CONFIG_DIR=%CONFIG_DIR%"
 set "CLAUDE_HOME=%CONFIG_DIR%"
