@@ -115,6 +115,12 @@ if exist "%CCS_DB%" (
     for /f "usebackq delims=" %%P in (`"%BIN_DIR%\sqlite3.exe" "%CCS_DB%" "SELECT listen_port FROM proxy_config WHERE app_type='claude' LIMIT 1" 2^>nul`) do (
       set "CC_SWITCH_PORT=%%P"
     )
+  ) else (
+    :: No sqlite3.exe — try PowerShell to read port from DB
+    set "CP_DB_PATH=%CCS_DB%"
+    for /f "usebackq delims=" %%P in (`powershell -NoProfile -Command "try { $f = $env:CP_DB_PATH; $bytes = [IO.File]::ReadAllBytes($f); $text = [Text.Encoding]::UTF8.GetString($bytes); $m = [regex]::Match($text, 'listen_port.*?(\d{4,5})'); if ($m.Success) { $m.Groups[1].Value } } catch {}" 2^>nul`) do (
+      set "CC_SWITCH_PORT=%%P"
+    )
   )
 )
 
@@ -159,13 +165,10 @@ echo [!] Proxy not ready, trying direct mode
 :: Try sqlite3.exe first (bundled by CI)
 if exist "%CCS_DB%" (
   if exist "%BIN_DIR%\sqlite3.exe" (
-    :: Write raw JSON to temp file (unique name to avoid collision)
     set "CCS_TMP=%TEMP%\ccs_%RANDOM%%RANDOM%"
     set "CCS_TMP_RAW=!CCS_TMP!_raw.txt"
     "%BIN_DIR%\sqlite3.exe" "%CCS_DB%" "SELECT settings_config FROM providers WHERE app_type='claude' AND is_current=1 LIMIT 1" > "!CCS_TMP_RAW!" 2>nul
     if exist "!CCS_TMP_RAW!" (
-      :: Parse via PowerShell — use [IO.File]::WriteAllText to avoid BOM
-      set "CCS_TMP_RAW=!CCS_TMP!_raw.txt"
       set "CCS_TMP_URL=!CCS_TMP!_url.txt"
       set "CCS_TMP_KEY=!CCS_TMP!_key.txt"
       powershell -NoProfile -Command "try { $raw = Get-Content $env:CCS_TMP_RAW -Raw -ErrorAction Stop; $cfg = $raw | ConvertFrom-Json; $e = $cfg.env; $k = $e.ANTHROPIC_AUTH_TOKEN; if (-not $k) { $k = $e.ANTHROPIC_API_KEY }; if ($e.ANTHROPIC_BASE_URL -and $k) { [IO.File]::WriteAllText($env:CCS_TMP_URL, $e.ANTHROPIC_BASE_URL); [IO.File]::WriteAllText($env:CCS_TMP_KEY, $k) } } catch {}" >nul 2>&1
@@ -176,6 +179,19 @@ if exist "%CCS_DB%" (
         del "!CCS_TMP_URL!" "!CCS_TMP_KEY!" >nul 2>&1
       )
       del "!CCS_TMP_RAW!" >nul 2>&1
+    )
+  ) else (
+    :: No sqlite3.exe — try PowerShell to extract config from DB binary
+    set "CP_DB_PATH=%CCS_DB%"
+    set "CCS_TMP3=%TEMP%\ccs_%RANDOM%%RANDOM%"
+    set "CCS_TMP3_URL=!CCS_TMP3!_url.txt"
+    set "CCS_TMP3_KEY=!CCS_TMP3!_key.txt"
+    powershell -NoProfile -Command "try { $f = $env:CP_DB_PATH; $bytes = [IO.File]::ReadAllBytes($f); $text = [Text.Encoding]::UTF8.GetString($bytes); $m = [regex]::Match($text, '\"ANTHROPIC_BASE_URL\"\s*:\s*\"([^\"]+)\"'); $mk = [regex]::Match($text, '\"ANTHROPIC_AUTH_TOKEN\"\s*:\s*\"([^\"]+)\"'); if (-not $mk.Success) { $mk = [regex]::Match($text, '\"ANTHROPIC_API_KEY\"\s*:\s*\"([^\"]+)\"') }; if ($m.Success -and $mk.Success) { [IO.File]::WriteAllText($env:CCS_TMP3_URL, $m.Groups[1].Value); [IO.File]::WriteAllText($env:CCS_TMP3_KEY, $mk.Groups[1].Value) } } catch {}" >nul 2>&1
+    if exist "!CCS_TMP3_URL!" (
+      set /p ANTHROPIC_BASE_URL=<"!CCS_TMP3_URL!"
+      set /p ANTHROPIC_API_KEY=<"!CCS_TMP3_KEY!"
+      set /p ANTHROPIC_AUTH_TOKEN=<"!CCS_TMP3_KEY!"
+      del "!CCS_TMP3_URL!" "!CCS_TMP3_KEY!" >nul 2>&1
     )
   )
 )
@@ -260,33 +276,24 @@ exit /b 0
 :check_has_provider
 set "HAS_CONFIG=0"
 
-:: Method 1: sqlite3.exe (bundled by CI)
+:: Method 1: DB file exists and is non-trivial (fastest, no dependencies)
 if exist "%CCS_DB%" (
-  if exist "%BIN_DIR%\sqlite3.exe" (
-    for /f "usebackq delims=" %%N in (`"%BIN_DIR%\sqlite3.exe" "%CCS_DB%" "SELECT COUNT(*) FROM providers WHERE app_type='claude'" 2^>nul`) do (
-      echo(%%N| findstr /r "^[0-9][0-9]*$" >nul 2>&1
-      if !errorlevel! EQU 0 if %%N GTR 0 set "HAS_CONFIG=1"
+  for %%F in ("%CCS_DB%") do if %%~zF GTR 1024 set "HAS_CONFIG=1"
+)
+
+:: Method 2: sqlite3.exe precise check (bundled by CI)
+if "!HAS_CONFIG!"=="0" (
+  if exist "%CCS_DB%" (
+    if exist "%BIN_DIR%\sqlite3.exe" (
+      for /f "usebackq delims=" %%N in (`"%BIN_DIR%\sqlite3.exe" "%CCS_DB%" "SELECT COUNT(*) FROM providers WHERE app_type='claude'" 2^>nul`) do (
+        echo(%%N| findstr /r "^[0-9][0-9]*$" >nul 2>&1
+        if !errorlevel! EQU 0 if %%N GTR 0 set "HAS_CONFIG=1"
+      )
     )
   )
 )
 
-:: Method 2: PowerShell reads DB (no sqlite3.exe needed)
-if "!HAS_CONFIG!"=="0" (
-  if exist "%CCS_DB%" (
-    set "CP_DB_PATH=%CCS_DB%"
-    powershell -NoProfile -Command "try { Add-Type -AssemblyName System.Data; $c = New-Object System.Data.SQLite.SQLiteConnection('Data Source=' + $env:CP_DB_PATH); $c.Open(); $cmd = $c.CreateCommand(); $cmd.CommandText = 'SELECT COUNT(*) FROM providers WHERE app_type=''claude'''; [int]$n = $cmd.ExecuteScalar(); $c.Close(); if ($n -gt 0) { exit 0 } else { exit 1 } } catch { try { $bytes = [IO.File]::ReadAllBytes($env:CP_DB_PATH); if ($bytes.Length -gt 100) { exit 0 } else { exit 1 } } catch { exit 1 } }" >nul 2>&1
-    if !errorlevel! EQU 0 set "HAS_CONFIG=1"
-  )
-)
-
-:: Method 3: DB file exists and is non-empty (last resort)
-if "!HAS_CONFIG!"=="0" (
-  if exist "%CCS_DB%" (
-    for %%F in ("%CCS_DB%") do if %%~zF GTR 1024 set "HAS_CONFIG=1"
-  )
-)
-
-:: Method 4: providers.json has valid entries
+:: Method 3: providers.json has valid entries
 if "!HAS_CONFIG!"=="0" (
   if exist "%CONFIG_FILE%" (
     set "CP_CHK_FILE=%CONFIG_FILE%"
