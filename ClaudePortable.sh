@@ -167,9 +167,11 @@ if [ -f "$BIN_DIR/cc-switch" ]; then
     done
 
     if [ "$CC_SWITCH_RUNNING" -eq 1 ]; then
-        export ANTHROPIC_BASE_URL="http://127.0.0.1:$CC_SWITCH_PORT"
-        export ANTHROPIC_API_KEY="portable-key"
+        export ANTHROPIC_BASE_URL=***
+        export ANTHROPIC_API_KEY=***
+export ANTHROPIC_AUTH_TOKEN=*** 
         PROXY_MODE="CC Switch 代理 (端口 $CC_SWITCH_PORT)"
+
     else
         echo "  [!] CC Switch 代理未就绪，尝试直连模式"
         PROXY_MODE="直连"
