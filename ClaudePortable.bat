@@ -75,31 +75,32 @@ echo   First Run - Configure API
 echo =====================================
 echo.
 echo   Opening CC Switch GUI...
-echo   Add a Provider, save, then close CC Switch.
+echo   Add a Provider and save (no need to close CC Switch).
 echo.
 start "" "%BIN_DIR%\cc-switch.exe"
 
-:: Wait for cc-switch.exe to fully exit (Electron may fork; we need
-:: to poll until no cc-switch.exe process exists at all)
-:wait_ccs_close
+:: Poll for DB to appear and have valid content (timeout 5 minutes)
+echo   Waiting for provider configuration...
+set "WAIT_COUNT=0"
+:wait_db
 timeout /t 2 >nul 2>&1
-tasklist /fi "ImageName eq cc-switch.exe" 2>nul | find /i "cc-switch.exe" >nul
-if !errorlevel! EQU 0 goto :wait_ccs_close
-
-:: Give DB a moment to flush after exit
-timeout /t 1 >nul 2>&1
-
-:: Re-check
+set /a WAIT_COUNT+=1
 set "HAS_CONFIG=0"
 if exist "%CCS_DB%" (
   for %%F in ("%CCS_DB%") do if %%~zF GTR 1024 set "HAS_CONFIG=1"
 )
-if "!HAS_CONFIG!"=="1" (
-  echo   [ok] Provider detected
-) else (
-  echo   [!] No provider found. Please configure in CC Switch and try again.
+if "!HAS_CONFIG!"=="1" goto :db_ready
+:: Timeout after 150 iterations × 2s = 5 min
+if !WAIT_COUNT! GEQ 150 (
+  echo   [!] Timeout waiting for provider config.
   pause & exit /b 1
 )
+goto :wait_db
+
+:db_ready
+echo   [ok] Provider detected, continuing...
+:: Give DB a moment to fully flush
+timeout /t 1 >nul 2>&1
 
 :load_config
 :: =============================================
