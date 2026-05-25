@@ -130,11 +130,14 @@ if exist "%CCS_DB%" (
       set "CC_SWITCH_PORT=%%P"
     )
   ) else (
-    :: No sqlite3.exe — try PowerShell to read port from DB
+    :: No sqlite3.exe — try PowerShell to read port from DB (via temp script)
     set "CP_DB_PATH=%CCS_DB%"
-    for /f "usebackq delims=" %%P in (`powershell -NoProfile -Command "try { $f = $env:CP_DB_PATH; $bytes = [IO.File]::ReadAllBytes($f); $text = [Text.Encoding]::UTF8.GetString($bytes); $m = [regex]::Match($text, 'listen_port.*?(\d{4,5})'); if ($m.Success) { $m.Groups[1].Value } } catch {}" 2^>nul`) do (
+    set "PS_PORT=%TEMP%\ccs_port_%RANDOM%%RANDOM%.ps1"
+    > "!PS_PORT!" echo try { $f = $env:CP_DB_PATH; $bytes = [IO.File]::ReadAllBytes($f); $text = [Text.Encoding]::UTF8.GetString($bytes); $m = [regex]::Match($text, 'listen_port.{1,20}?(\d{4,5})'); if ($m.Success) { Write-Output $m.Groups[1].Value } } catch {}
+    for /f "usebackq delims=" %%P in (`powershell -NoProfile -ExecutionPolicy Bypass -File "!PS_PORT!" 2^>nul`) do (
       set "CC_SWITCH_PORT=%%P"
     )
+    del "!PS_PORT!" >nul 2>&1
   )
 )
 
@@ -143,9 +146,26 @@ tasklist /fi "ImageName eq cc-switch.exe" 2>nul | find /i "cc-switch" >nul
 if !errorlevel! EQU 0 (
   echo   CC Switch [already running]
   :: Find the actual port cc-switch is listening on (port from DB may be wrong)
-  for /f "usebackq delims=" %%P in (`powershell -NoProfile -Command "try { $procs = Get-Process cc-switch -ErrorAction SilentlyContinue; if ($procs) { $pids = $procs.Id; $conns = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue ^| Where-Object { $pids -contains $_.OwningProcess -and $_.LocalAddress -match '127.0.0.1^|::1^|0.0.0.0' }; if ($conns) { ($conns ^| Sort-Object LocalPort ^| Select-Object -First 1).LocalPort } } } catch {}" 2^>nul`) do (
+  set "PS_PORTSCAN=%TEMP%\ccs_scan_%RANDOM%%RANDOM%.ps1"
+  > "!PS_PORTSCAN!" echo try {
+  >> "!PS_PORTSCAN!" echo   $procs = Get-Process cc-switch -ErrorAction SilentlyContinue
+  >> "!PS_PORTSCAN!" echo   if ($procs) {
+  >> "!PS_PORTSCAN!" echo     $procIds = $procs.Id
+  >> "!PS_PORTSCAN!" echo     $conns = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue ^| Where-Object { $procIds -contains $_.OwningProcess }
+  >> "!PS_PORTSCAN!" echo     foreach ($c in ($conns ^| Sort-Object LocalPort)) {
+  >> "!PS_PORTSCAN!" echo       try {
+  >> "!PS_PORTSCAN!" echo         $tc = New-Object Net.Sockets.TcpClient('127.0.0.1', $c.LocalPort)
+  >> "!PS_PORTSCAN!" echo         $tc.Close()
+  >> "!PS_PORTSCAN!" echo         Write-Output $c.LocalPort
+  >> "!PS_PORTSCAN!" echo         break
+  >> "!PS_PORTSCAN!" echo       } catch {}
+  >> "!PS_PORTSCAN!" echo     }
+  >> "!PS_PORTSCAN!" echo   }
+  >> "!PS_PORTSCAN!" echo } catch {}
+  for /f "usebackq delims=" %%P in (`powershell -NoProfile -ExecutionPolicy Bypass -File "!PS_PORTSCAN!" 2^>nul`) do (
     set "DETECTED_PORT=%%P"
   )
+  del "!PS_PORTSCAN!" >nul 2>&1
   if defined DETECTED_PORT (
     set "CC_SWITCH_PORT=!DETECTED_PORT!"
     echo   Detected proxy port: !CC_SWITCH_PORT!
@@ -174,11 +194,20 @@ goto :wp_loop
 
 :: If port from DB didn't work, scan common cc-switch ports
 if "!HAS_CCSWITCH!"=="0" (
-  for /f "usebackq delims=" %%P in (`powershell -NoProfile -Command "$pids = (Get-Process cc-switch -ErrorAction SilentlyContinue).Id; if ($pids) { $conns = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue ^| Where-Object { $pids -contains $_.OwningProcess }; foreach ($c in $conns ^| Sort-Object LocalPort) { try { $tc = New-Object Net.Sockets.TcpClient('127.0.0.1', $c.LocalPort); $tc.Close(); Write-Output $c.LocalPort; break } catch {} } }" 2^>nul`) do (
+  set "PS_FALLBACK=%TEMP%\ccs_fb_%RANDOM%%RANDOM%.ps1"
+  > "!PS_FALLBACK!" echo $procIds = (Get-Process cc-switch -ErrorAction SilentlyContinue).Id
+  >> "!PS_FALLBACK!" echo if ($procIds) {
+  >> "!PS_FALLBACK!" echo   $conns = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue ^| Where-Object { $procIds -contains $_.OwningProcess }
+  >> "!PS_FALLBACK!" echo   foreach ($c in $conns ^| Sort-Object LocalPort) {
+  >> "!PS_FALLBACK!" echo     try { $tc = New-Object Net.Sockets.TcpClient('127.0.0.1', $c.LocalPort); $tc.Close(); Write-Output $c.LocalPort; break } catch {}
+  >> "!PS_FALLBACK!" echo   }
+  >> "!PS_FALLBACK!" echo }
+  for /f "usebackq delims=" %%P in (`powershell -NoProfile -ExecutionPolicy Bypass -File "!PS_FALLBACK!" 2^>nul`) do (
     set "CC_SWITCH_PORT=%%P"
     set "HAS_CCSWITCH=1"
     echo   Found proxy on port %%P
   )
+  del "!PS_FALLBACK!" >nul 2>&1
 )
 
 :no_ccswitch
@@ -214,12 +243,26 @@ if exist "%CCS_DB%" (
       del "!CCS_TMP_RAW!" >nul 2>&1
     )
   ) else (
-    :: No sqlite3.exe — try PowerShell to extract config from DB binary
+    :: No sqlite3.exe — use PowerShell via temp script (avoids cmd quote hell)
     set "CP_DB_PATH=%CCS_DB%"
     set "CCS_TMP3=%TEMP%\ccs_%RANDOM%%RANDOM%"
     set "CCS_TMP3_URL=!CCS_TMP3!_url.txt"
     set "CCS_TMP3_KEY=!CCS_TMP3!_key.txt"
-    powershell -NoProfile -Command "try { $f = $env:CP_DB_PATH; $bytes = [IO.File]::ReadAllBytes($f); $text = [Text.Encoding]::UTF8.GetString($bytes); $m = [regex]::Match($text, '\"ANTHROPIC_BASE_URL\"\s*:\s*\"([^\"]+)\"'); $mk = [regex]::Match($text, '\"ANTHROPIC_AUTH_TOKEN\"\s*:\s*\"([^\"]+)\"'); if (-not $mk.Success) { $mk = [regex]::Match($text, '\"ANTHROPIC_API_KEY\"\s*:\s*\"([^\"]+)\"') }; if ($m.Success -and $mk.Success) { [IO.File]::WriteAllText($env:CCS_TMP3_URL, $m.Groups[1].Value); [IO.File]::WriteAllText($env:CCS_TMP3_KEY, $mk.Groups[1].Value) } } catch {}" >nul 2>&1
+    set "PS_DIRECT=%TEMP%\ccs_direct_%RANDOM%%RANDOM%.ps1"
+    > "!PS_DIRECT!" echo try {
+    >> "!PS_DIRECT!" echo   $f = $env:CP_DB_PATH
+    >> "!PS_DIRECT!" echo   $bytes = [IO.File]::ReadAllBytes($f)
+    >> "!PS_DIRECT!" echo   $text = [Text.Encoding]::UTF8.GetString($bytes)
+    >> "!PS_DIRECT!" echo   $m = [regex]::Match($text, '"ANTHROPIC_BASE_URL"\s*:\s*"([^"]+)"')
+    >> "!PS_DIRECT!" echo   $mk = [regex]::Match($text, '"ANTHROPIC_AUTH_TOKEN"\s*:\s*"([^"]+)"')
+    >> "!PS_DIRECT!" echo   if (-not $mk.Success) { $mk = [regex]::Match($text, '"ANTHROPIC_API_KEY"\s*:\s*"([^"]+)"') }
+    >> "!PS_DIRECT!" echo   if ($m.Success -and $mk.Success) {
+    >> "!PS_DIRECT!" echo     [IO.File]::WriteAllText($env:CCS_TMP3_URL, $m.Groups[1].Value)
+    >> "!PS_DIRECT!" echo     [IO.File]::WriteAllText($env:CCS_TMP3_KEY, $mk.Groups[1].Value)
+    >> "!PS_DIRECT!" echo   }
+    >> "!PS_DIRECT!" echo } catch {}
+    powershell -NoProfile -ExecutionPolicy Bypass -File "!PS_DIRECT!" >nul 2>&1
+    del "!PS_DIRECT!" >nul 2>&1
     if exist "!CCS_TMP3_URL!" (
       set /p ANTHROPIC_BASE_URL=<"!CCS_TMP3_URL!"
       set /p ANTHROPIC_API_KEY=<"!CCS_TMP3_KEY!"
