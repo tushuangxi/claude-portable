@@ -145,13 +145,26 @@ if exist "%CCS_DB%" (
 tasklist /fi "ImageName eq cc-switch.exe" 2>nul | find /i "cc-switch" >nul
 if !errorlevel! EQU 0 (
   echo   CC Switch [already running]
-  :: Find the actual port cc-switch is listening on (port from DB may be wrong)
-  set "PS_PORTSCAN=%TEMP%\ccs_scan_%RANDOM%%RANDOM%.ps1"
-  call :write_portscan_script "!PS_PORTSCAN!"
-  for /f "usebackq delims=" %%P in (`powershell -NoProfile -ExecutionPolicy Bypass -File "!PS_PORTSCAN!" 2^>nul`) do (
-    set "DETECTED_PORT=%%P"
+  :: Get cc-switch PIDs, then find their listening ports via netstat
+  set "CCS_PIDS="
+  for /f "tokens=2 delims=," %%P in ('tasklist /fi "ImageName eq cc-switch.exe" /fo csv /nh 2^>nul') do (
+    set "PID_RAW=%%~P"
+    if defined CCS_PIDS (
+      set "CCS_PIDS=!CCS_PIDS! !PID_RAW!"
+    ) else (
+      set "CCS_PIDS=!PID_RAW!"
+    )
   )
-  del "!PS_PORTSCAN!" >nul 2>&1
+  :: Scan netstat for listening ports owned by cc-switch
+  for /f "tokens=2,5" %%A in ('netstat -ano ^| findstr "LISTENING"') do (
+    for %%X in (!CCS_PIDS!) do (
+      if "%%B"=="%%X" (
+        for /f "tokens=2 delims=:" %%K in ("%%A") do (
+          if not defined DETECTED_PORT set "DETECTED_PORT=%%K"
+        )
+      )
+    )
+  )
   if defined DETECTED_PORT (
     set "CC_SWITCH_PORT=!DETECTED_PORT!"
     echo   Detected proxy port: !CC_SWITCH_PORT!
@@ -180,14 +193,17 @@ goto :wp_loop
 
 :: If port from DB didn't work, scan common cc-switch ports
 if "!HAS_CCSWITCH!"=="0" (
-  set "PS_FALLBACK=%TEMP%\ccs_fb_%RANDOM%%RANDOM%.ps1"
-  call :write_fallback_script "!PS_FALLBACK!"
-  for /f "usebackq delims=" %%P in (`powershell -NoProfile -ExecutionPolicy Bypass -File "!PS_FALLBACK!" 2^>nul`) do (
-    set "CC_SWITCH_PORT=%%P"
-    set "HAS_CCSWITCH=1"
-    echo   Found proxy on port %%P
+  echo   Scanning for proxy port...
+  for %%P in (15721 15722 15723 18080 8080 8081 7890 18079 15720) do (
+    if "!HAS_CCSWITCH!"=="0" (
+      powershell -NoProfile -Command "try { $c = New-Object Net.Sockets.TcpClient('127.0.0.1', %%P); $c.Close(); exit 0 } catch { exit 1 }" >nul 2>&1
+      if !errorlevel! EQU 0 (
+        set "CC_SWITCH_PORT=%%P"
+        set "HAS_CCSWITCH=1"
+        echo   Found proxy on port %%P
+      )
+    )
   )
-  del "!PS_FALLBACK!" >nul 2>&1
 )
 
 :no_ccswitch
