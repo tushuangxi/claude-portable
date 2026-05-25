@@ -86,8 +86,17 @@ ensure_symlink() {
 ensure_symlink "$SYS_CCS" "$PORTABLE_CCS"
 ensure_symlink "$SYS_CLAUDE" "$PORTABLE_CLAUDE"
 
+CC_SWITCH_PID=""
+WE_STARTED_CCS=0
+
 # 退出时清理符号链接（只清符号链接，不动真目录）
 cleanup() {
+    # 先杀掉本脚本启动的 cc-switch（如果还在运行）
+    if [ "$WE_STARTED_CCS" = "1" ] && [ -n "$CC_SWITCH_PID" ] && kill -0 "$CC_SWITCH_PID" 2>/dev/null; then
+        kill "$CC_SWITCH_PID" 2>/dev/null
+        sleep 0.5
+        kill -0 "$CC_SWITCH_PID" 2>/dev/null && kill -9 "$CC_SWITCH_PID" 2>/dev/null
+    fi
     [ -L "$SYS_CCS" ] && rm "$SYS_CCS" 2>/dev/null
     [ -L "$SYS_CLAUDE" ] && rm "$SYS_CLAUDE" 2>/dev/null
 }
@@ -130,8 +139,9 @@ if ! has_valid_config; then
     echo "  正在打开 CC Switch GUI..."
     echo "  添加一个 Provider 并保存（无需关闭 CC Switch）"
     echo ""
-    "$BIN_DIR/cc-switch" &>/dev/null &
+    "$BIN_DIR/cc-switch" >/dev/null 2>&1 &
     CC_SWITCH_PID=$!
+    WE_STARTED_CCS=1
 
     echo "  等待配置..."
     for i in $(seq 1 150); do
@@ -199,3 +209,12 @@ echo "  架构: $ARCH | 数据: 便携包内"
 echo ""
 
 "$BIN_DIR/claude" "$@"
+CLAUDE_EXIT=$?
+
+# 如果 claude 异常退出，留窗口给用户看错误
+if [ $CLAUDE_EXIT -ne 0 ]; then
+    echo ""
+    echo "  Claude 退出码: $CLAUDE_EXIT"
+    read -p "  按回车关闭窗口... " _
+fi
+exit $CLAUDE_EXIT

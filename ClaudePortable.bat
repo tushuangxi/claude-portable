@@ -38,6 +38,24 @@ if not exist "%BIN_DIR%\claude.exe" (
 )
 
 :: =============================================
+:: If cc-switch.exe is already running, kill it first
+:: (junction creation/deletion fails while it holds the path open)
+:: =============================================
+set "WE_STARTED_CCS=0"
+tasklist /fi "ImageName eq cc-switch.exe" 2>nul | find /i "cc-switch.exe" >nul
+if !errorlevel! EQU 0 (
+  echo   [info] Stopping existing CC Switch to set up portable mode...
+  taskkill /im cc-switch.exe /t >nul 2>&1
+  timeout /t 2 >nul 2>&1
+  :: Force kill if still running
+  tasklist /fi "ImageName eq cc-switch.exe" 2>nul | find /i "cc-switch.exe" >nul
+  if !errorlevel! EQU 0 (
+    taskkill /f /im cc-switch.exe /t >nul 2>&1
+    timeout /t 1 >nul 2>&1
+  )
+)
+
+:: =============================================
 :: Setup portable directories
 :: =============================================
 if not exist "%PORTABLE_DATA%" mkdir "%PORTABLE_DATA%"
@@ -101,6 +119,7 @@ echo   Opening CC Switch GUI...
 echo   Add a Provider and save (no need to close CC Switch).
 echo.
 start "" "%BIN_DIR%\cc-switch.exe"
+set "WE_STARTED_CCS=1"
 
 echo   Waiting for provider configuration...
 set "WAIT_COUNT=0"
@@ -123,8 +142,8 @@ timeout /t 1 >nul 2>&1
 :: =============================================
 :: Read API config from DB
 :: =============================================
-set "TMP_URL=%TEMP%\ccs_url_%RANDOM%.txt"
-set "TMP_KEY=%TEMP%\ccs_key_%RANDOM%.txt"
+set "TMP_URL=%TEMP%\ccs_url_%RANDOM%%RANDOM%.txt"
+set "TMP_KEY=%TEMP%\ccs_key_%RANDOM%%RANDOM%.txt"
 
 if exist "%LIB_DIR%\extract-config.ps1" (
   :: Retry up to 3 times in case DB is still being written
@@ -156,8 +175,17 @@ echo.
 "%BIN_DIR%\claude.exe" %*
 
 :: =============================================
-:: Cleanup: remove junctions to leave no trace on host
+:: Cleanup: kill cc-switch we started, then remove junctions
 :: =============================================
+if "!WE_STARTED_CCS!"=="1" (
+  taskkill /im cc-switch.exe /t >nul 2>&1
+  timeout /t 2 >nul 2>&1
+  tasklist /fi "ImageName eq cc-switch.exe" 2>nul | find /i "cc-switch.exe" >nul
+  if !errorlevel! EQU 0 (
+    taskkill /f /im cc-switch.exe /t >nul 2>&1
+    timeout /t 1 >nul 2>&1
+  )
+)
 :: Only remove if they are still junctions (user might have replaced them)
 call :remove_junction "%SYS_CCS%"
 call :remove_junction "%SYS_CLAUDE%"

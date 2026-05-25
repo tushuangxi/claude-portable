@@ -78,8 +78,16 @@ ensure_symlink() {
 ensure_symlink "$SYS_CCS" "$PORTABLE_CCS"
 ensure_symlink "$SYS_CLAUDE" "$PORTABLE_CLAUDE"
 
+CC_SWITCH_PID=""
+WE_STARTED_CCS=0
+
 # 退出时清理符号链接
 cleanup() {
+    if [ "$WE_STARTED_CCS" = "1" ] && [ -n "$CC_SWITCH_PID" ] && kill -0 "$CC_SWITCH_PID" 2>/dev/null; then
+        kill "$CC_SWITCH_PID" 2>/dev/null
+        sleep 0.5
+        kill -0 "$CC_SWITCH_PID" 2>/dev/null && kill -9 "$CC_SWITCH_PID" 2>/dev/null
+    fi
     [ -L "$SYS_CCS" ] && rm "$SYS_CCS" 2>/dev/null
     [ -L "$SYS_CLAUDE" ] && rm "$SYS_CLAUDE" 2>/dev/null
 }
@@ -126,8 +134,9 @@ if ! has_valid_config; then
         echo "  请在带图形界面的环境运行，或在另一台机器配置后复制 DB 过来"
         exit 1
     fi
-    "$BIN_DIR/cc-switch" &>/dev/null &
+    "$BIN_DIR/cc-switch" >/dev/null 2>&1 &
     CC_SWITCH_PID=$!
+    WE_STARTED_CCS=1
 
     echo "  等待配置..."
     for i in $(seq 1 150); do
