@@ -19,13 +19,13 @@ if not exist "%CONFIG_DIR%" mkdir "%CONFIG_DIR%"
 if not exist "%SCRIPT_DIR%data" mkdir "%SCRIPT_DIR%data"
 if not exist "%PORTABLE_CCS%" mkdir "%PORTABLE_CCS%"
 
-:: Sync DB from portable to home
+:: Sync DB from portable to home (新电脑无 home DB，强制覆盖)
 if exist "%PORTABLE_CCS%\cc-switch.db" (
   for %%F in ("%CCS_DB%") do if not exist "%%~dpF" mkdir "%%~dpF"
-  if exist "%CCS_DB%" copy /y "%PORTABLE_CCS%\cc-switch.db" "%CCS_DB%" >nul
+  copy /y "%PORTABLE_CCS%\cc-switch.db" "%CCS_DB%" >nul
 )
 
-:: 检查是否已完成配置（直接查 CC Switch 数据库，不依赖 .configured 文件）
+:: 检查是否已完成配置（检测 DB 而非 .configured — 换新电脑/换目录都能正确跳过）
 powershell -NoProfile -Command "if (Test-Path (Join-Path $env:USERPROFILE '.cc-switch\cc-switch.db')) { exit 0 } else { exit 1 }" >nul 2>&1
 if !errorlevel! EQU 0 goto :skip_first_run
 
