@@ -81,13 +81,12 @@ if !errorlevel! NEQ 0 (
 
 set "CCS_DB=%PORTABLE_CCS%\cc-switch.db"
 
+:: Subroutine helper for checking config (defined at end of file, called via :check_config)
+
 :: =============================================
 :: Check if valid config exists
 :: =============================================
-set "HAS_CONFIG=0"
-if exist "%CCS_DB%" (
-  for %%F in ("%CCS_DB%") do if %%~zF GTR 1024 set "HAS_CONFIG=1"
-)
+call :check_config
 if "!HAS_CONFIG!"=="1" goto :load_config
 
 :: =============================================
@@ -108,10 +107,7 @@ set "WAIT_COUNT=0"
 :wait_db
 timeout /t 2 >nul 2>&1
 set /a WAIT_COUNT+=1
-set "HAS_CONFIG=0"
-if exist "%CCS_DB%" (
-  for %%F in ("%CCS_DB%") do if %%~zF GTR 1024 set "HAS_CONFIG=1"
-)
+call :check_config
 if "!HAS_CONFIG!"=="1" goto :db_ready
 if !WAIT_COUNT! GEQ 150 (
   echo   [!] Timeout waiting for provider config.
@@ -167,6 +163,22 @@ call :remove_junction "%SYS_CCS%"
 call :remove_junction "%SYS_CLAUDE%"
 
 pause
+exit /b 0
+
+:: =============================================
+:: Subroutine: check if DB has at least one valid provider
+:: Sets HAS_CONFIG=1 or 0
+:: =============================================
+:check_config
+set "HAS_CONFIG=0"
+if not exist "%CCS_DB%" exit /b 0
+if exist "%LIB_DIR%\check-config.ps1" (
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%LIB_DIR%\check-config.ps1" "%CCS_DB%" >nul 2>&1
+  if !errorlevel! EQU 0 set "HAS_CONFIG=1"
+) else (
+  :: Fallback: file size check (less reliable)
+  for %%F in ("%CCS_DB%") do if %%~zF GTR 4096 set "HAS_CONFIG=1"
+)
 exit /b 0
 
 :: =============================================
