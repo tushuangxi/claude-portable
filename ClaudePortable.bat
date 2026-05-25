@@ -91,7 +91,7 @@ set "HAS_CCSWITCH=0"
 set "PROXY_MODE=Direct"
 
 if exist "%BIN_DIR%\cc-switch.exe" (
-  echo Starting CC Switch... (port !CC_SWITCH_PORT!)
+  echo Starting CC Switch... --port !CC_SWITCH_PORT!
   tasklist /fi "ImageName eq cc-switch.exe" 2>nul | find /i "cc-switch" >nul
   if !errorlevel! NEQ 0 (
     start "" "%BIN_DIR%\cc-switch.exe"
