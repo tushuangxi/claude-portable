@@ -230,15 +230,17 @@ if "!ANTHROPIC_AUTH_TOKEN!"=="" (
 :: =============================================
 :: Create binding lock (first run only) + ensure mirror
 :: =============================================
-if exist "%LIB_DIR%\binding.ps1" (
-  if not exist "%LOCK_FILE%" (
-    powershell -NoProfile -ExecutionPolicy Bypass -File "%LIB_DIR%\binding.ps1" create "%SCRIPT_DIR%" "%LOCK_FILE%" >nul 2>&1
-    if exist "%LOCK_FILE%" echo   [ok] Bound to current drive.
-  )
-  if not exist "%LOCK_FILE2%" (
-    powershell -NoProfile -ExecutionPolicy Bypass -File "%LIB_DIR%\binding.ps1" create "%SCRIPT_DIR%" "%LOCK_FILE2%" >nul 2>&1
-  )
-)
+if not exist "%LIB_DIR%\binding.ps1" goto :binding_create_done
+if exist "%LOCK_FILE%" goto :create_mirror
+
+powershell -NoProfile -ExecutionPolicy Bypass -File "%LIB_DIR%\binding.ps1" create "%SCRIPT_DIR%" "%LOCK_FILE%" >nul 2>&1
+if exist "%LOCK_FILE%" echo   [ok] Bound to current drive.
+
+:create_mirror
+if exist "%LOCK_FILE2%" goto :binding_create_done
+powershell -NoProfile -ExecutionPolicy Bypass -File "%LIB_DIR%\binding.ps1" create "%SCRIPT_DIR%" "%LOCK_FILE2%" >nul 2>&1
+
+:binding_create_done
 
 :: =============================================
 :: Launch Claude Code
