@@ -32,6 +32,12 @@ set "LOCK_FILE=%PORTABLE_DATA%\.lock"
 set "LOCK_FILE2=%PORTABLE_CCS%\.bind"
 set "RUN_LOCK=%PORTABLE_DATA%\.running"
 
+REM SCRIPT_DIR ends with \ (from %~dp0). When passed to PowerShell as
+REM "value\", the trailing backslash escapes the closing quote, merging
+REM the next argument. Use SCRIPT_DIR_PS without trailing backslash.
+set "SCRIPT_DIR_PS=%SCRIPT_DIR%"
+if "%SCRIPT_DIR_PS:~-1%"=="\" set "SCRIPT_DIR_PS=%SCRIPT_DIR_PS:~0,-1%"
+
 set "SYS_CCS=%USERPROFILE%\.cc-switch"
 set "SYS_CLAUDE=%USERPROFILE%\.claude"
 
@@ -90,7 +96,7 @@ if not exist "%LIB_DIR%\binding.ps1" goto :binding_done
 
 set "ACTIVE_LOCK=%LOCK_FILE%"
 if not exist "%LOCK_FILE%" set "ACTIVE_LOCK=%LOCK_FILE2%"
-powershell -NoProfile -ExecutionPolicy Bypass -File "%LIB_DIR%\binding.ps1" check "%SCRIPT_DIR%" "!ACTIVE_LOCK!" >nul 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -File "%LIB_DIR%\binding.ps1" check "%SCRIPT_DIR_PS%" "!ACTIVE_LOCK!" >nul 2>&1
 set "BIND_RESULT=!errorlevel!"
 if "!BIND_RESULT!"=="1" goto :binding_failed
 if "!BIND_RESULT!"=="3" echo   [warn] Could not verify drive binding (continuing).
@@ -233,12 +239,12 @@ if "!ANTHROPIC_AUTH_TOKEN!"=="" (
 if not exist "%LIB_DIR%\binding.ps1" goto :binding_create_done
 if exist "%LOCK_FILE%" goto :create_mirror
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%LIB_DIR%\binding.ps1" create "%SCRIPT_DIR%" "%LOCK_FILE%" >nul 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -File "%LIB_DIR%\binding.ps1" create "%SCRIPT_DIR_PS%" "%LOCK_FILE%" >nul 2>&1
 if exist "%LOCK_FILE%" echo   [ok] Bound to current drive.
 
 :create_mirror
 if exist "%LOCK_FILE2%" goto :binding_create_done
-powershell -NoProfile -ExecutionPolicy Bypass -File "%LIB_DIR%\binding.ps1" create "%SCRIPT_DIR%" "%LOCK_FILE2%" >nul 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -File "%LIB_DIR%\binding.ps1" create "%SCRIPT_DIR_PS%" "%LOCK_FILE2%" >nul 2>&1
 
 :binding_create_done
 
