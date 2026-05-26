@@ -88,6 +88,17 @@ a:hover{text-decoration:underline}
 .doc .card:hover{border-color:var(--accent)}
 .doc .card strong{font-family:var(--serif);font-size:1.05rem}
 .doc .card span{font-size:.88rem;opacity:.7;line-height:1.5}
+.doc .steps{display:flex;flex-direction:column;gap:14px;margin:18px 0;counter-reset:step}
+.doc .step{display:flex;gap:14px;align-items:flex-start;padding:16px 18px;border:1px solid var(--border);border-radius:4px;background:rgba(255,230,203,0.02)}
+.doc .step-num{font-family:var(--serif);font-size:1.6rem;font-weight:700;color:var(--accent);min-width:1.6em;line-height:1;opacity:.85}
+.doc .step-content{flex:1;min-width:0}
+.doc .step-title{font-family:var(--serif);font-size:1.1rem;font-weight:600;margin-bottom:6px;color:var(--mid);line-height:1.3}
+.doc .step-content p{margin:6px 0;opacity:.85}
+.doc .step-content code{font-size:.9em}
+.doc .callout{display:flex;gap:12px;align-items:flex-start;margin:18px 0;padding:14px 16px;border:1px solid var(--border);border-left:3px solid var(--accent);background:rgba(0,255,200,0.04)}
+.doc .callout-warn{border-left-color:#ffbd38;background:rgba(255,189,56,0.04)}
+.doc .callout-icon{font-family:var(--mono);font-size:1.1rem;flex-shrink:0;line-height:1.5;color:var(--accent)}
+.doc .callout-warn .callout-icon{color:#ffbd38}
 [data-theme="light"] .doc code{background:rgba(61,58,53,0.06)}
 [data-theme="light"] .doc pre{background:rgba(255,255,255,0.5)}
 
@@ -154,89 +165,163 @@ a:hover{text-decoration:underline}
 
 <main class="doc">
 
-<h2>快速开始</h2>
+<h2>第一次使用：四步上手</h2>
 
-<div class="platform-grid">
- <div class="card"><strong>🍎 macOS</strong><span>双击 <code>ClaudePortable.command</code></span></div>
- <div class="card"><strong>🐧 Linux</strong><span><code>chmod +x ClaudePortable.sh && ./ClaudePortable.sh</code></span></div>
- <div class="card"><strong>🪟 Windows</strong><span>双击 <code>ClaudePortable.bat</code></span></div>
+<p>如果你是第一次运行，按下面顺序操作就能用了。整个过程不到 2 分钟。</p>
+
+<div class="steps">
+ <div class="step">
+  <span class="step-num">1</span>
+  <div class="step-content">
+   <div class="step-title">解压到电脑或 U 盘</div>
+   <p>把下载的 zip 文件解压到一个方便访问的位置。如果想做成"插哪用哪"的便携包，直接解压到 U 盘根目录。</p>
+   <p style="font-size:.9em;opacity:.6">注意：U 盘格式必须是 NTFS 或 exFAT，不支持 FAT32。</p>
+  </div>
+ </div>
+
+ <div class="step">
+  <span class="step-num">2</span>
+  <div class="step-content">
+   <div class="step-title">双击启动文件</div>
+   <p>找到对应你系统的启动文件，双击它：</p>
+   <ul style="margin:6px 0 6px 18px">
+    <li><strong>Windows</strong>：双击 <code>ClaudePortable.bat</code></li>
+    <li><strong>macOS</strong>：双击 <code>ClaudePortable.command</code></li>
+    <li><strong>Linux</strong>：双击 <code>ClaudePortable.sh</code> 或在终端运行</li>
+   </ul>
+   <p>启动后会出现一个黑色终端窗口和 YLYG logo，这是正常的。</p>
+  </div>
+ </div>
+
+ <div class="step">
+  <span class="step-num">3</span>
+  <div class="step-content">
+   <div class="step-title">在 CC Switch 里添加 Provider</div>
+   <p>首次运行时脚本会自动弹出 <strong>CC Switch</strong> 图形界面（一个独立的窗口）。在里面：</p>
+   <ul style="margin:6px 0 6px 18px">
+    <li>点击 <strong>"添加 Provider"</strong> 或 "+" 按钮</li>
+    <li>填写你的 <strong>API Base URL</strong>（如 <code>https://api.anthropic.com</code> 或第三方端点）</li>
+    <li>填写你的 <strong>API Key</strong></li>
+    <li>选择 <strong>类型为 Claude</strong></li>
+    <li>点击 <strong>保存</strong>（不需要关闭 CC Switch 窗口）</li>
+   </ul>
+   <p style="font-size:.9em;opacity:.7">脚本会自动检测到你保存了配置，几秒后继续。</p>
+  </div>
+ </div>
+
+ <div class="step">
+  <span class="step-num">4</span>
+  <div class="step-content">
+   <div class="step-title">确认信任目录，开始对话</div>
+   <p>Claude Code 启动后会问 <strong>"Is this a project you trust?"</strong>，按 <code>Enter</code> 选择 <strong>"Yes, I trust this folder"</strong>。</p>
+   <p>看到 <code>&gt;</code> 提示符就可以开始对话了。试着输入 "你好" 测试一下。</p>
+  </div>
+ </div>
 </div>
 
-<p>首次运行会自动引导你配置 API。推荐选择 <strong>CC Switch 图形界面</strong>（选项 1），添加 Provider 后关闭窗口即可。</p>
+<div class="callout">
+ <span class="callout-icon">★</span>
+ <div>
+  <strong>之后再用就简单了：</strong>双击启动文件 → 直接进入 Claude Code 对话界面，不再需要任何配置。
+ </div>
+</div>
 
-<h2>工作原理</h2>
+<h2>关于防复制保护</h2>
 
-<p>启动脚本做了三件事：</p>
-<ol>
- <li><strong>启动 CC Switch 代理</strong> — 在本地监听端口，转发 API 请求到你配置的 Provider</li>
- <li><strong>设置环境变量</strong> — 让 Claude Code 通过本地代理连接</li>
- <li><strong>启动 Claude Code</strong> — 进入交互式 CLI</li>
-</ol>
+<p>首次成功配置后，便携包会<strong>自动绑定</strong>到当前 U 盘或硬盘。这意味着：</p>
 
-<blockquote>CC Switch 支持多 Provider 切换、负载均衡、故障转移。你可以随时打开 CC Switch 修改配置。</blockquote>
+<ul>
+ <li>✅ 你可以把 U 盘插到不同电脑，正常使用配置跟随</li>
+ <li>❌ 别人复制你的 ClaudeCodePortable 文件夹到他们的电脑，<strong>会被拒绝运行</strong></li>
+ <li>🔓 如果你自己想换新 U 盘，运行 <code>ClaudePortable.bat --unlock</code>（macOS/Linux 同名）解绑后再迁移</li>
+</ul>
+
+<div class="callout callout-warn">
+ <span class="callout-icon">⚠</span>
+ <div>
+  <strong>重要：</strong>如果格式化 U 盘后重新解压，绑定会自动重新生成（无影响）。但如果想保留配置，请先备份 <code>data/.cc-switch/</code> 目录。
+ </div>
+</div>
+
+<h2>切换 Provider</h2>
+
+<p>已经配置好之后，想换 API 提供商或切换不同 Key？打开 <code>bin/</code> 目录下的 <code>cc-switch</code>（macOS 是 <code>.app</code>，Windows 是 <code>cc-switch.exe</code>），在 GUI 里：</p>
+<ul>
+ <li>添加新的 Provider</li>
+ <li>点击对应 Provider 的"激活"按钮切换</li>
+ <li>保存后，下次启动 Claude Code 自动使用新配置</li>
+</ul>
 
 <h2>目录结构</h2>
 
 <pre><code>ClaudeCodePortable/
-├── bin/                    # 各平台二进制文件
+├── bin/                    # 各平台二进制
 │   ├── macos-arm64/        # Apple Silicon
 │   ├── macos-x64/          # Intel Mac
 │   ├── linux-x64/          # Linux x86_64
 │   └── windows-x64/        # Windows 64-bit
-├── config/                 # 配置文件
-│   ├── claude/             # Claude Code 权限配置
-│   └── ccswitch/           # CC Switch 备用配置
-├── data/                   # 运行时数据（会话、DB）
+├── lib/                    # PowerShell / shell 辅助脚本
+├── data/                   # 你的所有数据（首次运行后生成）
+│   ├── .cc-switch/         # CC Switch 数据（API Keys、provider 配置）
+│   ├── .claude/            # Claude Code 会话历史
+│   ├── .lock               # 防复制绑定锁
+│   └── .running            # 单实例运行锁
 ├── ClaudePortable.command  # macOS 启动脚本
 ├── ClaudePortable.sh       # Linux 启动脚本
 └── ClaudePortable.bat      # Windows 启动脚本</code></pre>
 
-<h2>配置 API</h2>
+<h2>常见问题</h2>
 
-<h3>方式一：CC Switch GUI（推荐）</h3>
-<p>首次运行选择 <code>1</code>，或直接运行 <code>bin/</code> 目录下的 <code>cc-switch</code> 可执行文件。在图形界面中添加你的 API Provider：</p>
+<h3>启动后说 "No provider found"</h3>
+<p>这意味着 CC Switch 还没有保存有效的 Provider 配置。返回 CC Switch 窗口，确认你填写了 Base URL 和 API Key 并点击了保存按钮。</p>
+
+<h3>提示 "locked to its original USB drive"</h3>
+<p>说明这个文件夹是从别处复制过来的（防复制保护生效）。如果是你本人想迁移：</p>
+<pre><code>ClaudePortable.bat --unlock        # Windows
+./ClaudePortable.command --unlock  # macOS
+./ClaudePortable.sh --unlock       # Linux</code></pre>
+
+<h3>macOS 提示 "无法验证开发者"</h3>
+<p>启动脚本会自动处理。如果仍然被拦截，在终端里执行：</p>
+<pre><code>xattr -dr com.apple.quarantine /path/to/ClaudeCodePortable</code></pre>
+
+<h3>Windows 上首次运行报错或卡住</h3>
+<p>确保：</p>
 <ul>
- <li>填写 Base URL（如 <code>https://api.anthropic.com</code> 或第三方兼容端点）</li>
- <li>填写 API Key</li>
- <li>保存后关闭 CC Switch</li>
+ <li>U 盘格式是 NTFS 或 exFAT（不能是 FAT32）</li>
+ <li>没有杀毒软件拦截 <code>mklink</code> 命令</li>
+ <li>解压路径不要太深，不要含中文（<code>C:\ClaudePortable\</code> 是好的位置）</li>
 </ul>
 
-<h3>方式二：命令行快速配置</h3>
-<p>首次运行选择 <code>2</code>，按提示输入 Base URL 和 API Key。配置保存在 <code>config/ccswitch/providers.json</code>。</p>
+<h3>"Auth conflict" 警告</h3>
+<p>如果之前自己装过 Claude Code，环境变量可能冲突。脚本启动时会自动清理。如果还有问题，关闭所有终端重新双击启动文件。</p>
 
-<h2>环境变量</h2>
+<h3>更新到新版本</h3>
+<p>下载新版 zip，解压到一个新文件夹，把旧文件夹的 <code>data/</code> 目录复制过去覆盖。配置、对话历史、绑定锁全部保留。</p>
+
+<h3>双击没反应（Linux）</h3>
+<p>大部分 Linux 文件管理器默认不会双击执行 .sh。打开终端：</p>
+<pre><code>cd /path/to/ClaudeCodePortable
+chmod +x ClaudePortable.sh
+./ClaudePortable.sh</code></pre>
+
+<h2>环境变量参考</h2>
 
 <table>
  <tr><th>变量</th><th>说明</th></tr>
- <tr><td><code>ANTHROPIC_BASE_URL</code></td><td>API 端点（代理模式自动设置）</td></tr>
- <tr><td><code>ANTHROPIC_API_KEY</code></td><td>API Key（代理模式自动设置）</td></tr>
- <tr><td><code>CLAUDE_CONFIG_DIR</code></td><td>Claude 配置目录（指向 data/.claude）</td></tr>
- <tr><td><code>CLAUDE_HOME</code></td><td>Claude 主目录（指向 data/.claude）</td></tr>
+ <tr><td><code>ANTHROPIC_BASE_URL</code></td><td>API 端点（脚本自动从 CC Switch DB 读取）</td></tr>
+ <tr><td><code>ANTHROPIC_AUTH_TOKEN</code></td><td>API Key（脚本自动设置）</td></tr>
+ <tr><td><code>HOME</code> / <code>USERPROFILE</code></td><td>系统 HOME 目录（用 junction/symlink 重定向到便携包）</td></tr>
 </table>
 
-<h2>便携性</h2>
+<h2>命令行参数</h2>
 
-<p>所有数据存储在 <code>data/</code> 目录内，不污染系统 HOME 目录。你可以：</p>
-<ul>
- <li>把整个文件夹复制到 U 盘，在不同电脑间使用</li>
- <li>CC Switch 配置会自动在便携包和系统之间同步</li>
- <li>会话历史跟随便携包移动</li>
-</ul>
-
-<h2>常见问题</h2>
-
-<h3>macOS 提示"无法打开，因为无法验证开发者"</h3>
-<p>启动脚本会自动移除 quarantine 属性。如果仍然被拦截，手动执行：</p>
-<pre><code>xattr -dr com.apple.quarantine /path/to/ClaudeCodePortable</code></pre>
-
-<h3>CC Switch 代理未就绪</h3>
-<p>脚本会自动回退到直连模式，从 DB 或 providers.json 读取配置直接连接 API。功能不受影响。</p>
-
-<h3>更新 Claude Code</h3>
-<p>替换 <code>bin/</code> 目录下对应平台的二进制文件即可。配置和数据不受影响。</p>
-
-<h3>Windows 上首次运行检测不到配置</h3>
-<p>确保使用 Release 页面下载的 zip 包（包含 sqlite3.exe）。如果是从源码运行，脚本会通过文件大小检测兜底。</p>
+<table>
+ <tr><th>参数</th><th>作用</th></tr>
+ <tr><td>（无）</td><td>正常启动 Claude Code</td></tr>
+ <tr><td><code>--unlock</code></td><td>解除 U 盘绑定（用于合法迁移）</td></tr>
+ <tr><td>其他参数</td><td>透传给 <code>claude</code> 命令</td></tr>
+</table>
 
 </main>
 
