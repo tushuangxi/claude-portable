@@ -219,9 +219,13 @@ a:hover{text-decoration:underline}
 <h3>启动后说 "No provider found"</h3>
 <p>这种情况很少出现。如果遇到，先重新插拔 U 盘再双击启动文件。如果仍然有问题，联系卖家。</p>
 
-<h3>macOS 提示 "无法验证开发者"</h3>
-<p>启动脚本会自动处理。如果仍然被拦截，在终端里执行：</p>
-<pre><code>xattr -dr com.apple.quarantine /Volumes/U盘名/ClaudeCodePortable</code></pre>
+<h3>macOS 提示 "无法验证开发者" 或 "无权限执行"</h3>
+<p>第一次双击 <code>.command</code> 文件可能提示无法执行。两种处理方式：</p>
+<ul>
+ <li><strong>右键打开</strong>（推荐）：右键点击 <code>ClaudePortable.command</code> → 选择"打开" → 在弹窗中再点"打开"。下次就能双击运行了。</li>
+ <li><strong>用终端</strong>：打开"终端"，输入 <code>chmod +x </code>（带空格），把 <code>ClaudePortable.command</code> 文件拖到终端里，回车即可。同样处理一遍 <code>lib/binding.sh</code>。</li>
+</ul>
+<p style="font-size:.9em;opacity:.7">这是 macOS 自带解压工具的限制 — 解压 zip 时会丢失文件的执行权限。用 The Unarchiver 或 Keka 解压可以避免此问题。</p>
 
 <h3>Windows 上首次运行报错或卡住</h3>
 <p>常见原因：</p>

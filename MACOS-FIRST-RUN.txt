@@ -1,0 +1,32 @@
+macOS 首次使用说明
+==================
+
+如果双击 ClaudePortable.command 提示"无法执行"或"权限不足"：
+
+方法 1（推荐）：右键打开
+  1. 在 Finder 中右键点击 ClaudePortable.command
+  2. 选择"打开"
+  3. 在弹窗中再点"打开"
+  4. 之后就可以双击运行了
+
+方法 2：用终端运行（一次性）
+  打开"终端"应用（在"应用程序" → "实用工具"里）
+  把下面这行复制粘贴进终端，按回车：
+
+    cd '/Volumes/你的U盘名/ClaudeCodePortable' && bash ClaudePortable.command
+
+  把"你的U盘名"换成实际名称（在 Finder 左侧栏看）。
+
+方法 3：永久修复权限
+  打开"终端"，把下面这行粘贴进去（直接拖入文件夹更方便）：
+
+    chmod +x '/Volumes/你的U盘名/ClaudeCodePortable/ClaudePortable.command'
+    chmod +x '/Volumes/你的U盘名/ClaudeCodePortable/lib/binding.sh'
+
+  之后双击 .command 就能用了。
+
+
+为什么会这样？
+  macOS 自带的"归档实用工具"解压 zip 时会丢失文件的执行权限。
+  这是 macOS 的限制，与本程序无关。
+  如果以后用 The Unarchiver 或 Keka 解压可以避免此问题。
