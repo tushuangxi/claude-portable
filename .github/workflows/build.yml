@@ -202,13 +202,18 @@ jobs:
           # Copy everything
           cp -a bin/ "$STAGE/bin/"
           cp -a config/ "$STAGE/config/"
+          cp -a lib/ "$STAGE/lib/"
           mkdir -p "$STAGE/data"
           cp ClaudePortable.command ClaudePortable.sh ClaudePortable.bat "$STAGE/"
           # CRLF normalize .bat (GNU sed \r is literal 'r', use Python)
           python3 -c "import sys;c=open('$STAGE/ClaudePortable.bat','rb').read();open('$STAGE/ClaudePortable.bat','wb').write(c.replace(b'\r\n',b'\n').replace(b'\n',b'\r\n'))"
+          # Make Unix scripts executable
+          chmod +x "$STAGE/ClaudePortable.command" "$STAGE/ClaudePortable.sh" "$STAGE/lib/binding.sh" 2>/dev/null || true
           cp ClaudePortable使用说明.html "$STAGE/" 2>/dev/null || true
           cp README.md "$STAGE/"
           cp .gitignore "$STAGE/" 2>/dev/null || true
+          # Ensure data folder is empty (no stray .lock from build)
+          rm -f "$STAGE/data/.lock" 2>/dev/null || true
 
           # Create zip
           cd /tmp

@@ -11,6 +11,11 @@ data/**/*.jsonl.gz
 
 # Portable DB (auto-generated, user-specific)
 data/cc-switch/
+data/.cc-switch/
+data/.claude/
+
+# Drive binding lock (per-USB, never commit)
+data/.lock
 
 # Temp
 *.tmp

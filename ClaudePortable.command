@@ -6,6 +6,18 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ARCH="$(uname -m)"
 
+# 处理 --unlock 参数
+if [ "${1:-}" = "--unlock" ]; then
+    LOCK_FILE="$SCRIPT_DIR/data/.lock"
+    if [ -f "$LOCK_FILE" ]; then
+        rm -f "$LOCK_FILE"
+        echo "  [ok] 已移除绑定锁，下次运行将重新绑定到当前位置。"
+    else
+        echo "  [info] 没有绑定锁需要移除。"
+    fi
+    exit 0
+fi
+
 # Banner
 GOLD='\033[38;5;220m'
 AMBER='\033[38;5;214m'
@@ -49,8 +61,36 @@ PORTABLE_CLAUDE="$PORTABLE_DATA/.claude"
 SYS_CCS="$HOME/.cc-switch"
 SYS_CLAUDE="$HOME/.claude"
 CCS_DB="$PORTABLE_CCS/cc-switch.db"
+LIB_DIR="$SCRIPT_DIR/lib"
+LOCK_FILE="$PORTABLE_DATA/.lock"
 
 mkdir -p "$PORTABLE_CCS" "$PORTABLE_CLAUDE"
+
+# ═══════════════════════════════════════════
+# 设备绑定校验
+# ═══════════════════════════════════════════
+if [ -f "$LOCK_FILE" ] && [ -f "$LIB_DIR/binding.sh" ]; then
+    chmod +x "$LIB_DIR/binding.sh" 2>/dev/null
+    bash "$LIB_DIR/binding.sh" check "$SCRIPT_DIR" "$LOCK_FILE"
+    bind_result=$?
+    if [ $bind_result -eq 1 ]; then
+        echo ""
+        echo "  ============================================================"
+        echo "  [ERROR] 此便携包已绑定到原始设备。"
+        echo "  ============================================================"
+        echo ""
+        echo "  当前位置与绑定设备不匹配。这是防复制保护机制。"
+        echo "  此便携包不能被复制到其他设备运行。"
+        echo ""
+        echo "  如果你是原始所有者并主动移动了它："
+        echo "    ./ClaudePortable.command --unlock"
+        echo ""
+        exit 1
+    fi
+    if [ $bind_result -eq 3 ]; then
+        echo "  [warn] 无法验证设备绑定（继续运行）。"
+    fi
+fi
 
 # 一次性迁移：把系统已有的数据复制到便携包
 migrate_dir() {
@@ -217,6 +257,16 @@ if read_config; then
 else
     echo "  [!] 无法从 DB 读取配置"
     exit 1
+fi
+
+# ═══════════════════════════════════════════
+# 创建绑定锁（首次成功运行后）
+# ═══════════════════════════════════════════
+if [ ! -f "$LOCK_FILE" ] && [ -f "$LIB_DIR/binding.sh" ]; then
+    bash "$LIB_DIR/binding.sh" create "$SCRIPT_DIR" "$LOCK_FILE" 2>/dev/null
+    if [ -f "$LOCK_FILE" ]; then
+        echo "  [ok] 已绑定到当前设备。解绑命令：./ClaudePortable.command --unlock"
+    fi
 fi
 
 # ═══════════════════════════════════════════
