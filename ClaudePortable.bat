@@ -44,32 +44,40 @@ if not exist "%BIN_DIR%\claude.exe" (
 :: =============================================
 :: Handle --unlock argument
 :: =============================================
-if /i "%~1"=="--unlock" (
-  set "LOCK_REMOVED=0"
-  if exist "%LOCK_FILE%" del /f /q "%LOCK_FILE%" >nul 2>&1
-  if exist "%LOCK_FILE2%" del /f /q "%LOCK_FILE2%" >nul 2>&1
-  echo   [ok] Unlock complete. Next run will rebind to current location.
-  pause
-  exit /b 0
-)
+if /i "%~1"=="--unlock" goto :do_unlock
+
+goto :after_unlock
+
+:do_unlock
+if exist "%LOCK_FILE%" del /f /q "%LOCK_FILE%" >nul 2>&1
+if exist "%LOCK_FILE2%" del /f /q "%LOCK_FILE2%" >nul 2>&1
+echo   [ok] Unlock complete. Next run will rebind to current location.
+pause
+exit /b 0
+
+:after_unlock
 
 :: =============================================
 :: Single-instance check (best effort)
 :: =============================================
 if not exist "%PORTABLE_DATA%" mkdir "%PORTABLE_DATA%" >nul 2>&1
-if exist "%RUN_LOCK%" (
-  set "PREV_PID="
-  for /f "usebackq delims=" %%P in ("%RUN_LOCK%") do if not defined PREV_PID set "PREV_PID=%%P"
-  if defined PREV_PID (
-    tasklist /fi "PID eq !PREV_PID!" 2>nul | find "!PREV_PID!" >nul
-    if !errorlevel! EQU 0 (
-      echo   [info] Another instance is already running.
-      timeout /t 5 >nul 2>&1
-      exit /b 1
-    )
-  )
-  del /f /q "%RUN_LOCK%" >nul 2>&1
+if not exist "%RUN_LOCK%" goto :run_lock_done
+
+set "PREV_PID="
+for /f "usebackq delims=" %%P in ("%RUN_LOCK%") do if not defined PREV_PID set "PREV_PID=%%P"
+if not defined PREV_PID goto :clear_stale_lock
+
+tasklist /fi "PID eq !PREV_PID!" 2>nul | find "!PREV_PID!" >nul
+if !errorlevel! EQU 0 (
+  echo   [info] Another instance is already running.
+  timeout /t 5 >nul 2>&1
+  exit /b 1
 )
+
+:clear_stale_lock
+del /f /q "%RUN_LOCK%" >nul 2>&1
+
+:run_lock_done
 
 :: =============================================
 :: Drive binding check (BEFORE any side effects)
@@ -77,31 +85,33 @@ if exist "%RUN_LOCK%" (
 set "LOCK_PRESENT=0"
 if exist "%LOCK_FILE%" set "LOCK_PRESENT=1"
 if exist "%LOCK_FILE2%" set "LOCK_PRESENT=1"
+if "!LOCK_PRESENT!"=="0" goto :binding_done
+if not exist "%LIB_DIR%\binding.ps1" goto :binding_done
 
-if "!LOCK_PRESENT!"=="1" (
-  if exist "%LIB_DIR%\binding.ps1" (
-    set "ACTIVE_LOCK=%LOCK_FILE%"
-    if not exist "%LOCK_FILE%" set "ACTIVE_LOCK=%LOCK_FILE2%"
-    powershell -NoProfile -ExecutionPolicy Bypass -File "%LIB_DIR%\binding.ps1" check "%SCRIPT_DIR%" "!ACTIVE_LOCK!" >nul 2>&1
-    set "BIND_RESULT=!errorlevel!"
-    if "!BIND_RESULT!"=="1" (
-      echo.
-      echo   ============================================================
-      echo   [ERROR] This portable is locked to its original USB drive.
-      echo   ============================================================
-      echo.
-      echo   The current location does not match the bound device.
-      echo   This portable cannot be copied to other drives.
-      echo.
-      echo   Original owner can unbind with:
-      echo     ClaudePortable.bat --unlock
-      echo.
-      pause
-      exit /b 1
-    )
-    if "!BIND_RESULT!"=="3" echo   [warn] Could not verify drive binding (continuing).
-  )
-)
+set "ACTIVE_LOCK=%LOCK_FILE%"
+if not exist "%LOCK_FILE%" set "ACTIVE_LOCK=%LOCK_FILE2%"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%LIB_DIR%\binding.ps1" check "%SCRIPT_DIR%" "!ACTIVE_LOCK!" >nul 2>&1
+set "BIND_RESULT=!errorlevel!"
+if "!BIND_RESULT!"=="1" goto :binding_failed
+if "!BIND_RESULT!"=="3" echo   [warn] Could not verify drive binding (continuing).
+goto :binding_done
+
+:binding_failed
+echo.
+echo   ============================================================
+echo   [ERROR] This portable is locked to its original USB drive.
+echo   ============================================================
+echo.
+echo   The current location does not match the bound device.
+echo   This portable cannot be copied to other drives.
+echo.
+echo   Original owner can unbind with:
+echo     ClaudePortable.bat --unlock
+echo.
+pause
+exit /b 1
+
+:binding_done
 
 :: =============================================
 :: Kill any existing cc-switch (junction creation/removal needs the path free)
