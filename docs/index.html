@@ -226,22 +226,13 @@ a:hover{text-decoration:underline}
  </div>
 </div>
 
-<h2>关于防复制保护</h2>
+<h2>关于 U 盘绑定</h2>
 
-<p>首次成功配置后，便携包会<strong>自动绑定</strong>到当前 U 盘或硬盘。这意味着：</p>
+<p>首次配置成功后，便携包会绑定到当前设备。你可以正常使用，<strong>把 U 盘插到不同电脑都没问题</strong>。如果以后要换新 U 盘自用，先运行一次 <code>--unlock</code> 解绑：</p>
 
-<ul>
- <li>✅ 你可以把 U 盘插到不同电脑，正常使用配置跟随</li>
- <li>❌ 别人复制你的 ClaudeCodePortable 文件夹到他们的电脑，<strong>会被拒绝运行</strong></li>
- <li>🔓 如果你自己想换新 U 盘，运行 <code>ClaudePortable.bat --unlock</code>（macOS/Linux 同名）解绑后再迁移</li>
-</ul>
-
-<div class="callout callout-warn">
- <span class="callout-icon">⚠</span>
- <div>
-  <strong>重要：</strong>如果格式化 U 盘后重新解压，绑定会自动重新生成（无影响）。但如果想保留配置，请先备份 <code>data/.cc-switch/</code> 目录。
- </div>
-</div>
+<pre><code>ClaudePortable.bat --unlock        # Windows
+./ClaudePortable.command --unlock  # macOS
+./ClaudePortable.sh --unlock       # Linux</code></pre>
 
 <h2>切换 Provider</h2>
 
@@ -276,7 +267,7 @@ a:hover{text-decoration:underline}
 <p>这意味着 CC Switch 还没有保存有效的 Provider 配置。返回 CC Switch 窗口，确认你填写了 Base URL 和 API Key 并点击了保存按钮。</p>
 
 <h3>提示 "locked to its original USB drive"</h3>
-<p>说明这个文件夹是从别处复制过来的（防复制保护生效）。如果是你本人想迁移：</p>
+<p>说明这个文件夹是从其他设备移过来的。如果是你本人想迁移，运行解绑命令：</p>
 <pre><code>ClaudePortable.bat --unlock        # Windows
 ./ClaudePortable.command --unlock  # macOS
 ./ClaudePortable.sh --unlock       # Linux</code></pre>
