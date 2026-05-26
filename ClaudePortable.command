@@ -56,6 +56,23 @@ xattr -dr com.apple.quarantine "$BIN_DIR/claude" 2>/dev/null
 xattr -dr com.apple.quarantine "$BIN_DIR/cc-switch" 2>/dev/null
 
 # ═══════════════════════════════════════════
+# 单实例锁（防止并发运行）
+# ═══════════════════════════════════════════
+RUN_LOCK="$SCRIPT_DIR/data/.running"
+mkdir -p "$SCRIPT_DIR/data"
+if [ -f "$RUN_LOCK" ]; then
+    PREV_PID=$(cat "$RUN_LOCK" 2>/dev/null | head -1 | tr -d '[:space:]')
+    if [ -n "$PREV_PID" ] && kill -0 "$PREV_PID" 2>/dev/null; then
+        echo "  [info] 已有另一个实例正在运行 (PID $PREV_PID)。"
+        echo "  如果错误，请删除：$RUN_LOCK"
+        exit 1
+    fi
+    # Stale lock — clear
+    rm -f "$RUN_LOCK"
+fi
+echo $$ > "$RUN_LOCK"
+
+# ═══════════════════════════════════════════
 # 便携目录设置
 # ═══════════════════════════════════════════
 PORTABLE_DATA="$SCRIPT_DIR/data"
@@ -162,6 +179,8 @@ cleanup() {
     fi
     [ -L "$SYS_CCS" ] && rm "$SYS_CCS" 2>/dev/null
     [ -L "$SYS_CLAUDE" ] && rm "$SYS_CLAUDE" 2>/dev/null
+    # 清理单实例锁
+    [ -f "$RUN_LOCK" ] && rm -f "$RUN_LOCK"
 }
 trap cleanup EXIT INT TERM
 
@@ -270,14 +289,19 @@ else
 fi
 
 # ═══════════════════════════════════════════
-# 创建绑定锁（首次成功运行后，写入两个位置）
+# 创建/修复绑定锁（首次成功运行后，写入两个位置）
+# 任一 lock 文件缺失就重新生成（保证防绕过完整性）
 # ═══════════════════════════════════════════
-if [ ! -f "$LOCK_FILE" ] && [ -f "$LIB_DIR/binding.sh" ]; then
-    bash "$LIB_DIR/binding.sh" create "$SCRIPT_DIR" "$LOCK_FILE" 2>/dev/null
-    if [ -f "$LOCK_FILE" ]; then
-        # 镜像到第二位置（隐藏在 cc-switch 数据目录中）
+if [ -f "$LIB_DIR/binding.sh" ]; then
+    if [ ! -f "$LOCK_FILE" ]; then
+        bash "$LIB_DIR/binding.sh" create "$SCRIPT_DIR" "$LOCK_FILE" 2>/dev/null
+        if [ -f "$LOCK_FILE" ]; then
+            echo "  [ok] 已绑定到当前设备。解绑命令：./ClaudePortable.command --unlock"
+        fi
+    fi
+    # 镜像 lock 缺失就补上（防止用户手动删除单个文件绕过绑定）
+    if [ ! -f "$PORTABLE_CCS/.bind" ]; then
         bash "$LIB_DIR/binding.sh" create "$SCRIPT_DIR" "$PORTABLE_CCS/.bind" 2>/dev/null
-        echo "  [ok] 已绑定到当前设备。解绑命令：./ClaudePortable.command --unlock"
     fi
 fi
 

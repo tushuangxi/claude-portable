@@ -52,6 +52,22 @@ fi
 chmod +x "$BIN_DIR/claude" "$BIN_DIR/cc-switch" 2>/dev/null
 
 # ═══════════════════════════════════════════
+# 单实例锁（防止并发运行）
+# ═══════════════════════════════════════════
+RUN_LOCK="$SCRIPT_DIR/data/.running"
+mkdir -p "$SCRIPT_DIR/data"
+if [ -f "$RUN_LOCK" ]; then
+    PREV_PID=$(cat "$RUN_LOCK" 2>/dev/null | head -1 | tr -d '[:space:]')
+    if [ -n "$PREV_PID" ] && kill -0 "$PREV_PID" 2>/dev/null; then
+        echo "  [info] 已有另一个实例正在运行 (PID $PREV_PID)。"
+        echo "  如果错误，请删除：$RUN_LOCK"
+        exit 1
+    fi
+    rm -f "$RUN_LOCK"
+fi
+echo $$ > "$RUN_LOCK"
+
+# ═══════════════════════════════════════════
 # 便携目录设置
 # ═══════════════════════════════════════════
 PORTABLE_DATA="$SCRIPT_DIR/data"
@@ -148,6 +164,8 @@ cleanup() {
     fi
     [ -L "$SYS_CCS" ] && rm "$SYS_CCS" 2>/dev/null
     [ -L "$SYS_CLAUDE" ] && rm "$SYS_CLAUDE" 2>/dev/null
+    # 清理单实例锁
+    [ -f "$RUN_LOCK" ] && rm -f "$RUN_LOCK"
 }
 trap cleanup EXIT INT TERM
 
@@ -259,13 +277,17 @@ else
 fi
 
 # ═══════════════════════════════════════════
-# 创建绑定锁（首次成功运行后，写入两个位置）
+# 创建/修复绑定锁（任一缺失就补上）
 # ═══════════════════════════════════════════
-if [ ! -f "$LOCK_FILE" ] && [ -f "$LIB_DIR/binding.sh" ]; then
-    bash "$LIB_DIR/binding.sh" create "$SCRIPT_DIR" "$LOCK_FILE" 2>/dev/null
-    if [ -f "$LOCK_FILE" ]; then
+if [ -f "$LIB_DIR/binding.sh" ]; then
+    if [ ! -f "$LOCK_FILE" ]; then
+        bash "$LIB_DIR/binding.sh" create "$SCRIPT_DIR" "$LOCK_FILE" 2>/dev/null
+        if [ -f "$LOCK_FILE" ]; then
+            echo "  [ok] 已绑定到当前设备。解绑命令：./ClaudePortable.sh --unlock"
+        fi
+    fi
+    if [ ! -f "$PORTABLE_CCS/.bind" ]; then
         bash "$LIB_DIR/binding.sh" create "$SCRIPT_DIR" "$PORTABLE_CCS/.bind" 2>/dev/null
-        echo "  [ok] 已绑定到当前设备。解绑命令：./ClaudePortable.sh --unlock"
     fi
 fi
 

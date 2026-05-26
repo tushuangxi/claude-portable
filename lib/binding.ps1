@@ -41,10 +41,10 @@ function Get-Fingerprint {
 }
 
 function Get-Hash {
-    param([string]$Input)
-    if (-not $Input) { return $null }
+    param([string]$InputString)
+    if (-not $InputString) { return $null }
     # Add a static salt so attackers can't easily compute the hash from a guessed fingerprint
-    $salted = "ClaudePortable-v1::" + $Input
+    $salted = "ClaudePortable-v1::" + $InputString
     $bytes = [Text.Encoding]::UTF8.GetBytes($salted)
     $sha = [Security.Cryptography.SHA256]::Create()
     $hashBytes = $sha.ComputeHash($bytes)
@@ -56,7 +56,7 @@ if (-not $fingerprint) {
     # Could not determine fingerprint — fail closed
     exit 3
 }
-$currentHash = Get-Hash -Input $fingerprint
+$currentHash = Get-Hash -InputString $fingerprint
 
 if ($Mode -eq 'check') {
     if (-not (Test-Path $LockFile)) { exit 2 }

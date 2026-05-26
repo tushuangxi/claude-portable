@@ -39,6 +39,40 @@ if not exist "%BIN_DIR%\claude.exe" (
 )
 
 :: =============================================
+:: Single-instance check via lock file with PID
+:: =============================================
+set "RUN_LOCK=%PORTABLE_DATA%\.running"
+if not exist "%PORTABLE_DATA%" mkdir "%PORTABLE_DATA%" >nul 2>&1
+if exist "%RUN_LOCK%" (
+  set "PREV_PID="
+  for /f "usebackq delims=" %%P in ("%RUN_LOCK%") do (
+    if not defined PREV_PID set "PREV_PID=%%P"
+  )
+  if defined PREV_PID (
+    tasklist /fi "PID eq !PREV_PID!" /fi "ImageName eq cmd.exe" 2>nul | find "!PREV_PID!" >nul
+    if !errorlevel! EQU 0 (
+      echo   [info] Another instance is already running (PID !PREV_PID!).
+      echo   If this is incorrect, delete: %RUN_LOCK%
+      timeout /t 5 >nul 2>&1
+      exit /b 1
+    )
+  )
+  :: Stale lock — clear and proceed
+  del /f /q "%RUN_LOCK%" >nul 2>&1
+)
+:: Write our PID. Use a unique window title to identify our cmd PID.
+set "TITLE_TAG=ClaudePortable_%RANDOM%%RANDOM%"
+title !TITLE_TAG!
+set "MY_PID="
+for /f "tokens=2" %%P in ('tasklist /v /fi "WindowTitle eq !TITLE_TAG!" /nh 2^>nul ^| findstr /i "cmd.exe"') do (
+  if not defined MY_PID set "MY_PID=%%P"
+)
+title Claude Code Portable + CC Switch
+if defined MY_PID (
+  >"%RUN_LOCK%" echo !MY_PID!
+)
+
+:: =============================================
 :: Handle --unlock argument: remove BOTH lock files and exit
 :: =============================================
 if /i "%~1"=="--unlock" (
@@ -237,15 +271,18 @@ if "!ANTHROPIC_AUTH_TOKEN!"=="" (
 :: =============================================
 :: Create binding lock if not yet bound (first successful run)
 :: Write to two locations so removing one doesn't bypass the check.
+:: Both files are created/repaired — if one was deleted, recreate it.
 :: =============================================
-if not exist "%LOCK_FILE%" (
-  if exist "%LIB_DIR%\binding.ps1" (
+if exist "%LIB_DIR%\binding.ps1" (
+  if not exist "%LOCK_FILE%" (
     powershell -NoProfile -ExecutionPolicy Bypass -File "%LIB_DIR%\binding.ps1" create "%SCRIPT_DIR%" "%LOCK_FILE%" >nul 2>&1
     if exist "%LOCK_FILE%" (
-      :: Mirror to second location inside .cc-switch (looks like cc-switch internal data)
-      powershell -NoProfile -ExecutionPolicy Bypass -File "%LIB_DIR%\binding.ps1" create "%SCRIPT_DIR%" "%PORTABLE_CCS%\.bind" >nul 2>&1
       echo   [ok] Bound to current drive. To unbind: ClaudePortable.bat --unlock
     )
+  )
+  :: Always ensure mirror exists (re-create if missing, e.g. user deleted it manually)
+  if not exist "%PORTABLE_CCS%\.bind" (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%LIB_DIR%\binding.ps1" create "%SCRIPT_DIR%" "%PORTABLE_CCS%\.bind" >nul 2>&1
   )
 )
 
@@ -283,6 +320,8 @@ if "!WE_STARTED_CCS!"=="1" (
 )
 call :remove_junction "%SYS_CCS%"
 call :remove_junction "%SYS_CLAUDE%"
+:: Remove single-instance lock
+if exist "%RUN_LOCK%" del /f /q "%RUN_LOCK%" >nul 2>&1
 exit /b 0
 
 :: =============================================
