@@ -165,9 +165,9 @@ a:hover{text-decoration:underline}
 
 <main class="doc">
 
-<h2>第一次使用：三步上手</h2>
+<h2>第一次使用：四步上手</h2>
 
-<p>整个过程不到 1 分钟。</p>
+<p>整个过程不到 2 分钟。</p>
 
 <div class="steps">
  <div class="step">
@@ -196,6 +196,22 @@ a:hover{text-decoration:underline}
  <div class="step">
   <span class="step-num">3</span>
   <div class="step-content">
+   <div class="step-title">出现 CC Switch 窗口（如果是首次配置）</div>
+   <p>如果 U 盘是<strong>全新未配置</strong>的，会自动弹出 <strong>CC Switch</strong> 图形界面。在里面：</p>
+   <ul style="margin:6px 0 6px 18px">
+    <li>点 <strong>"添加 Provider"</strong> 或 "+" 按钮</li>
+    <li>填写 <strong>API Base URL</strong>（如 <code>https://api.anthropic.com</code> 或第三方端点）</li>
+    <li>填写 <strong>API Key</strong></li>
+    <li>类型选 <strong>Claude</strong></li>
+    <li>点 <strong>保存</strong>（不需要关闭 CC Switch 窗口）</li>
+   </ul>
+   <p style="font-size:.9em;opacity:.7">如果卖家已经在 U 盘里预配置了 Provider，这一步会自动跳过。</p>
+  </div>
+ </div>
+
+ <div class="step">
+  <span class="step-num">4</span>
+  <div class="step-content">
    <div class="step-title">确认信任目录，开始对话</div>
    <p>Claude Code 启动后会问 <strong>"Is this a project you trust?"</strong>，按 <code>Enter</code> 选择 <strong>"Yes, I trust this folder"</strong>。</p>
    <p>看到 <code>&gt;</code> 提示符就可以开始对话了。试着输入 "你好" 测试一下。</p>
@@ -213,6 +229,32 @@ a:hover{text-decoration:underline}
 <h2>关于 U 盘绑定</h2>
 
 <p>这块 U 盘已经为你配置好了 API 和绑定。<strong>你可以把 U 盘插到任何电脑使用</strong>，配置都跟着 U 盘走。但出于安全考虑，文件夹被复制到其他设备运行时会被拒绝。</p>
+
+<h2>切换大模型 / Provider</h2>
+
+<p>需要换不同的 API 提供商或不同 Key 时，打开 U 盘里的 <strong>CC Switch</strong> 工具：</p>
+
+<ul>
+ <li><strong>Windows</strong>：打开 U 盘 → 进入 <code>bin\windows-x64\</code> 文件夹 → 双击 <code>cc-switch.exe</code></li>
+ <li><strong>macOS</strong>：打开 U 盘 → 进入 <code>bin/macos-arm64/</code> 或 <code>bin/macos-x64/</code> 文件夹 → 双击 <code>cc-switch</code></li>
+ <li><strong>Linux</strong>：进入 <code>bin/linux-x64/</code> 文件夹 → 双击 <code>cc-switch</code></li>
+</ul>
+
+<p>在 CC Switch 图形界面里：</p>
+<ul>
+ <li><strong>添加新 Provider</strong>：点 "+" 或"添加"按钮，填入 Base URL 和 API Key，保存</li>
+ <li><strong>切换 Provider</strong>：在 Provider 列表中点击对应的"激活"按钮</li>
+ <li><strong>关闭 CC Switch</strong>：保存后直接关闭窗口即可</li>
+</ul>
+
+<p>下次双击启动文件时，Claude Code 会自动使用你激活的 Provider。<strong>不需要重新配置任何东西。</strong></p>
+
+<div class="callout">
+ <span class="callout-icon">💡</span>
+ <div>
+  <strong>小贴士：</strong>CC Switch 可以同时保存多个 Provider，比如 Anthropic 官方、MiniMax、DeepSeek 等。你随时一键切换，不用重新输 API Key。
+ </div>
+</div>
 
 <h2>常见问题</h2>
 
@@ -242,9 +284,6 @@ a:hover{text-decoration:underline}
 <pre><code>cd /path/to/ClaudeCodePortable
 chmod +x ClaudePortable.sh
 ./ClaudePortable.sh</code></pre>
-
-<h3>切换 Provider</h3>
-<p>想用不同的 API 提供商或不同 Key？打开 U 盘 <code>bin/</code> 目录下的 <code>cc-switch</code>（macOS 是 <code>.app</code>，Windows 是 <code>cc-switch.exe</code>），在 GUI 里添加新的 Provider 或激活已有的，保存后下次启动 Claude Code 自动用新配置。</p>
 
 </main>
 
