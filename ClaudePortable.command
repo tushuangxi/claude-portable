@@ -6,11 +6,14 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ARCH="$(uname -m)"
 
-# 处理 --unlock 参数
+# 处理 --unlock 参数（删除两个 lock 文件）
 if [ "${1:-}" = "--unlock" ]; then
     LOCK_FILE="$SCRIPT_DIR/data/.lock"
-    if [ -f "$LOCK_FILE" ]; then
-        rm -f "$LOCK_FILE"
+    LOCK_FILE2="$SCRIPT_DIR/data/.cc-switch/.bind"
+    REMOVED=0
+    [ -f "$LOCK_FILE" ] && { rm -f "$LOCK_FILE"; REMOVED=1; }
+    [ -f "$LOCK_FILE2" ] && { rm -f "$LOCK_FILE2"; REMOVED=1; }
+    if [ "$REMOVED" = "1" ]; then
         echo "  [ok] 已移除绑定锁，下次运行将重新绑定到当前位置。"
     else
         echo "  [info] 没有绑定锁需要移除。"
@@ -67,11 +70,18 @@ LOCK_FILE="$PORTABLE_DATA/.lock"
 mkdir -p "$PORTABLE_CCS" "$PORTABLE_CLAUDE"
 
 # ═══════════════════════════════════════════
-# 设备绑定校验
+# 设备绑定校验（双 lock 文件，删除一个不能绕过）
 # ═══════════════════════════════════════════
-if [ -f "$LOCK_FILE" ] && [ -f "$LIB_DIR/binding.sh" ]; then
+LOCK_FILE2="$PORTABLE_CCS/.bind"
+LOCK_PRESENT=0
+[ -f "$LOCK_FILE" ] && LOCK_PRESENT=1
+[ -f "$LOCK_FILE2" ] && LOCK_PRESENT=1
+
+if [ "$LOCK_PRESENT" = "1" ] && [ -f "$LIB_DIR/binding.sh" ]; then
     chmod +x "$LIB_DIR/binding.sh" 2>/dev/null
-    bash "$LIB_DIR/binding.sh" check "$SCRIPT_DIR" "$LOCK_FILE"
+    ACTIVE_LOCK="$LOCK_FILE"
+    [ ! -f "$LOCK_FILE" ] && ACTIVE_LOCK="$LOCK_FILE2"
+    bash "$LIB_DIR/binding.sh" check "$SCRIPT_DIR" "$ACTIVE_LOCK"
     bind_result=$?
     if [ $bind_result -eq 1 ]; then
         echo ""
@@ -260,11 +270,13 @@ else
 fi
 
 # ═══════════════════════════════════════════
-# 创建绑定锁（首次成功运行后）
+# 创建绑定锁（首次成功运行后，写入两个位置）
 # ═══════════════════════════════════════════
 if [ ! -f "$LOCK_FILE" ] && [ -f "$LIB_DIR/binding.sh" ]; then
     bash "$LIB_DIR/binding.sh" create "$SCRIPT_DIR" "$LOCK_FILE" 2>/dev/null
     if [ -f "$LOCK_FILE" ]; then
+        # 镜像到第二位置（隐藏在 cc-switch 数据目录中）
+        bash "$LIB_DIR/binding.sh" create "$SCRIPT_DIR" "$PORTABLE_CCS/.bind" 2>/dev/null
         echo "  [ok] 已绑定到当前设备。解绑命令：./ClaudePortable.command --unlock"
     fi
 fi

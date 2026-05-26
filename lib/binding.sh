@@ -30,23 +30,24 @@ get_fingerprint() {
     if [ "$os" = "Darwin" ]; then
         # macOS: use diskutil to get volume UUID
         local mount_point
-        mount_point=$(df "$abs" 2>/dev/null | awk 'NR==2 {for (i=NF; i>=1; i--) if ($i ~ /^\//) { print $i; exit }}')
+        # df -P 强制单行输出，避免设备名换行
+        mount_point=$(df -P "$abs" 2>/dev/null | tail -1 | awk '{for (i=NF; i>=1; i--) if ($i ~ /^\//) { print $i; exit }}')
         [ -z "$mount_point" ] && return 1
         # Try Volume UUID first
         local uuid
-        uuid=$(diskutil info "$mount_point" 2>/dev/null | awk -F': *' '/Volume UUID/ { print $2; exit }')
+        uuid=$(diskutil info "$mount_point" 2>/dev/null | awk -F': *' '/Volume UUID/ { print $2; exit }' | tr -d '[:space:]')
         if [ -n "$uuid" ]; then echo "uuid:$uuid"; return 0; fi
         # Fallback: Disk / Partition UUID
-        uuid=$(diskutil info "$mount_point" 2>/dev/null | awk -F': *' '/Disk \/ Partition UUID/ { print $2; exit }')
+        uuid=$(diskutil info "$mount_point" 2>/dev/null | awk -F': *' '/Disk \/ Partition UUID/ { print $2; exit }' | tr -d '[:space:]')
         if [ -n "$uuid" ]; then echo "puuid:$uuid"; return 0; fi
         # Last resort: device node (changes if drive remounted as different device)
         local dev
-        dev=$(df "$abs" 2>/dev/null | awk 'NR==2 {print $1}')
+        dev=$(df -P "$abs" 2>/dev/null | tail -1 | awk '{print $1}')
         [ -n "$dev" ] && { echo "dev:$dev"; return 0; }
     else
         # Linux: use findmnt or blkid for filesystem UUID
         local dev
-        dev=$(df "$abs" 2>/dev/null | awk 'NR==2 {print $1}')
+        dev=$(df -P "$abs" 2>/dev/null | tail -1 | awk '{print $1}')
         [ -z "$dev" ] && return 1
         # Try findmnt (most reliable, doesn't need root)
         local uuid

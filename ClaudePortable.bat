@@ -39,11 +39,20 @@ if not exist "%BIN_DIR%\claude.exe" (
 )
 
 :: =============================================
-:: Handle --unlock argument: remove lock and exit
+:: Handle --unlock argument: remove BOTH lock files and exit
 :: =============================================
 if /i "%~1"=="--unlock" (
+  set "LOCK_FILE2=%PORTABLE_CCS%\.bind"
+  set "LOCK_REMOVED=0"
   if exist "%LOCK_FILE%" (
     del /f /q "%LOCK_FILE%" >nul 2>&1
+    set "LOCK_REMOVED=1"
+  )
+  if exist "!LOCK_FILE2!" (
+    del /f /q "!LOCK_FILE2!" >nul 2>&1
+    set "LOCK_REMOVED=1"
+  )
+  if "!LOCK_REMOVED!"=="1" (
     echo   [ok] Lock removed. Next run will rebind to current location.
   ) else (
     echo   [info] No lock to remove.
@@ -52,10 +61,41 @@ if /i "%~1"=="--unlock" (
 )
 
 :: =============================================
-:: Drive binding check (after first config, before launch)
-:: We check binding only AFTER we know config exists.
-:: First-run users will have lock created post-config.
+:: Drive binding check (BEFORE killing cc-switch — fail safe)
+:: Lock is stored in two places to make bypass harder.
+:: Check happens FIRST so failed binding doesn't disturb host system.
 :: =============================================
+set "LOCK_FILE2=%PORTABLE_CCS%\.bind"
+set "LOCK_PRESENT=0"
+if exist "%LOCK_FILE%" set "LOCK_PRESENT=1"
+if exist "%LOCK_FILE2%" set "LOCK_PRESENT=1"
+
+if "!LOCK_PRESENT!"=="1" (
+  if exist "%LIB_DIR%\binding.ps1" (
+    set "ACTIVE_LOCK=%LOCK_FILE%"
+    if not exist "%LOCK_FILE%" set "ACTIVE_LOCK=%LOCK_FILE2%"
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%LIB_DIR%\binding.ps1" check "%SCRIPT_DIR%" "!ACTIVE_LOCK!" >nul 2>&1
+    set "BIND_RESULT=!errorlevel!"
+    if "!BIND_RESULT!"=="1" (
+      echo.
+      echo   ============================================================
+      echo   [ERROR] This portable is locked to its original USB drive.
+      echo   ============================================================
+      echo.
+      echo   The current location does not match the bound device.
+      echo   This portable cannot be copied to other drives without
+      echo   the original owner's authorization.
+      echo.
+      echo   If you are the original owner and intentionally moved it:
+      echo     ClaudePortable.bat --unlock
+      echo.
+      pause & exit /b 1
+    )
+    if "!BIND_RESULT!"=="3" (
+      echo   [warn] Could not verify drive binding (continuing).
+    )
+  )
+)
 
 :: =============================================
 :: If cc-switch.exe is already running, kill it first
@@ -72,34 +112,6 @@ if !errorlevel! EQU 0 (
   if !errorlevel! EQU 0 (
     taskkill /f /im cc-switch.exe /t >nul 2>&1
     timeout /t 1 >nul 2>&1
-  )
-)
-
-:: =============================================
-:: Drive binding check
-:: =============================================
-if exist "%LOCK_FILE%" (
-  if exist "%LIB_DIR%\binding.ps1" (
-    powershell -NoProfile -ExecutionPolicy Bypass -File "%LIB_DIR%\binding.ps1" check "%SCRIPT_DIR%" "%LOCK_FILE%" >nul 2>&1
-    set "BIND_RESULT=!errorlevel!"
-    if "!BIND_RESULT!"=="1" (
-      echo.
-      echo   ============================================================
-      echo   [ERROR] This portable is locked to its original USB drive.
-      echo   ============================================================
-      echo.
-      echo   The current location does not match the bound device.
-      echo   This is normal protection — the portable cannot be copied
-      echo   to other drives without the original owner's authorization.
-      echo.
-      echo   If you are the original owner and intentionally moved it:
-      echo     ClaudePortable.bat --unlock
-      echo.
-      pause & exit /b 1
-    )
-    if "!BIND_RESULT!"=="3" (
-      echo   [warn] Could not verify drive binding (continuing).
-    )
   )
 )
 
@@ -224,11 +236,14 @@ if "!ANTHROPIC_AUTH_TOKEN!"=="" (
 
 :: =============================================
 :: Create binding lock if not yet bound (first successful run)
+:: Write to two locations so removing one doesn't bypass the check.
 :: =============================================
 if not exist "%LOCK_FILE%" (
   if exist "%LIB_DIR%\binding.ps1" (
     powershell -NoProfile -ExecutionPolicy Bypass -File "%LIB_DIR%\binding.ps1" create "%SCRIPT_DIR%" "%LOCK_FILE%" >nul 2>&1
     if exist "%LOCK_FILE%" (
+      :: Mirror to second location inside .cc-switch (looks like cc-switch internal data)
+      powershell -NoProfile -ExecutionPolicy Bypass -File "%LIB_DIR%\binding.ps1" create "%SCRIPT_DIR%" "%PORTABLE_CCS%\.bind" >nul 2>&1
       echo   [ok] Bound to current drive. To unbind: ClaudePortable.bat --unlock
     )
   )
