@@ -136,7 +136,13 @@ ensure_symlink() {
         fi
         rm "$link" 2>/dev/null
     elif [ -d "$link" ]; then
-        rmdir "$link" 2>/dev/null || rm -rf "$link" 2>/dev/null
+        # Real directory — user has a pre-existing system install.
+        # Migrate contents into portable folder before replacing.
+        if [ -n "$(ls -A "$link" 2>/dev/null)" ]; then
+            echo "  [migrate] $link → $target"
+            cp -a "$link/." "$target/" 2>/dev/null
+        fi
+        rm -rf "$link" 2>/dev/null
     fi
     ln -s "$target" "$link" 2>/dev/null
 }

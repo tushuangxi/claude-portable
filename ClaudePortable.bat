@@ -166,7 +166,12 @@ if !errorlevel! NEQ 0 (
 set "CCS_DB=%PORTABLE_CCS%\cc-switch.db"
 
 :: Write run-lock now that we own the session
-echo %~1 > "%RUN_LOCK%"
+:: %~1 was a bug — it's the first CLI arg, not the PID.
+:: Use a unique identifier: the cmd.exe process title or a timestamp.
+:: Windows cmd doesn't have $$ (PID), but we can get it via wmic.
+for /f "tokens=2 delims==" %%P in ('wmic process where "Name='cmd.exe' and CommandLine like '%%ClaudePortable%%'" get ProcessId /value 2^>nul ^| findstr "ProcessId"') do set "MY_PID=%%P"
+if not defined MY_PID set "MY_PID=%RANDOM%%RANDOM%"
+echo !MY_PID! > "%RUN_LOCK%"
 
 :: =============================================
 :: Check config exists
@@ -297,10 +302,23 @@ if not exist "%LINK%" (
   mklink /D "%LINK%" "%TARGET%" >nul 2>&1
   exit /b !errorlevel!
 )
+REM Check if it's already a junction/symlink pointing to our target
 fsutil reparsepoint query "%LINK%" >nul 2>&1
 if !errorlevel! EQU 0 exit /b 0
-rd "%LINK%" 2>nul
-if exist "%LINK%" rd /s /q "%LINK%" 2>nul
+REM It's a real directory (not a junction). This means the user has
+REM a pre-existing system install. Migrate its contents into our
+REM portable folder BEFORE replacing with a junction. Never rd /s /q
+REM a real user directory — that would destroy their data.
+if exist "%LINK%\*" (
+  echo   [migrate] Moving existing %LINK% into portable folder...
+  xcopy /e /i /y /q "%LINK%" "%TARGET%" >nul 2>&1
+  rd /s /q "%LINK%" 2>nul
+  if exist "%LINK%" (
+    REM Could not remove — files may be locked. Rename instead.
+    ren "%LINK%" "%~n1.bak" >nul 2>&1
+  )
+)
+if exist "%LINK%" rd "%LINK%" 2>nul
 mklink /J "%LINK%" "%TARGET%" >nul 2>&1
 if !errorlevel! EQU 0 exit /b 0
 mklink /D "%LINK%" "%TARGET%" >nul 2>&1

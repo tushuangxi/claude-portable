@@ -145,8 +145,13 @@ ensure_symlink() {
         # 指向其他位置，删除并重建
         rm "$link" 2>/dev/null
     elif [ -d "$link" ]; then
-        # 真目录（迁移后应该已经空了）
-        rmdir "$link" 2>/dev/null || rm -rf "$link" 2>/dev/null
+        # 真目录 — 用户有预装的系统版本。迁移内容到便携目录
+        # 再替换为 symlink。绝不 rm -rf 用户数据。
+        if [ -n "$(ls -A "$link" 2>/dev/null)" ]; then
+            echo "  [migrate] $link → $target"
+            cp -a "$link/." "$target/" 2>/dev/null
+        fi
+        rm -rf "$link" 2>/dev/null
     fi
     ln -s "$target" "$link" 2>/dev/null
 }
