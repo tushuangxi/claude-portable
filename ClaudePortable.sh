@@ -137,10 +137,19 @@ ensure_symlink() {
         rm "$link" 2>/dev/null
     elif [ -d "$link" ]; then
         # Real directory — user has a pre-existing system install.
-        # Migrate contents into portable folder before replacing.
+        # Migrate only if portable target is empty (don't overwrite
+        # existing portable data).
         if [ -n "$(ls -A "$link" 2>/dev/null)" ]; then
-            echo "  [migrate] $link → $target"
-            cp -a "$link/." "$target/" 2>/dev/null
+            if [ -z "$(ls -A "$target" 2>/dev/null)" ]; then
+                echo "  [migrate] $link → $target"
+                cp -a "$link/." "$target/" 2>/dev/null
+            else
+                echo "  [warn] portable target not empty, skipping merge"
+                local backup="${link}.before-portable.$(date +%Y%m%d-%H%M%S)"
+                mv "$link" "$backup" 2>/dev/null && echo "  [info] system data backed up to: $backup"
+                ln -s "$target" "$link" 2>/dev/null
+                return 0
+            fi
         fi
         rm -rf "$link" 2>/dev/null
     fi

@@ -145,11 +145,21 @@ ensure_symlink() {
         # 指向其他位置，删除并重建
         rm "$link" 2>/dev/null
     elif [ -d "$link" ]; then
-        # 真目录 — 用户有预装的系统版本。迁移内容到便携目录
-        # 再替换为 symlink。绝不 rm -rf 用户数据。
+        # 真目录 — 用户有预装的系统版本。
+        # 仅当便携目录为空时才迁移（避免覆盖便携数据）。
+        # 绝不 rm -rf 用户数据。
         if [ -n "$(ls -A "$link" 2>/dev/null)" ]; then
-            echo "  [migrate] $link → $target"
-            cp -a "$link/." "$target/" 2>/dev/null
+            if [ -z "$(ls -A "$target" 2>/dev/null)" ]; then
+                echo "  [migrate] $link → $target"
+                cp -a "$link/." "$target/" 2>/dev/null
+            else
+                echo "  [warn] 便携包已有数据，跳过系统目录迁移: $link"
+                # 把系统目录改名备份而不是删除
+                local backup="${link}.before-portable.$(date +%Y%m%d-%H%M%S)"
+                mv "$link" "$backup" 2>/dev/null && echo "  [info] 系统数据已备份到: $backup"
+                ln -s "$target" "$link" 2>/dev/null
+                return 0
+            fi
         fi
         rm -rf "$link" 2>/dev/null
     fi
