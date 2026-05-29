@@ -4,7 +4,9 @@ param([Parameter(Mandatory=$true)][string]$DbPath)
 
 if (-not (Test-Path $DbPath)) { exit 1 }
 
-# Try System.Data.SQLite first (precise SQL query, no false positives from deleted rows)
+# Try System.Data.SQLite first (precise SQL query, no false positives from deleted rows).
+# This assembly is available when sqlite-net or similar is installed,
+# but is NOT shipped with Windows PowerShell 5.1 by default.
 try {
     Add-Type -AssemblyName System.Data.SQLite -ErrorAction Stop
     $cs = "Data Source=$DbPath;Read Only=True;"
@@ -24,24 +26,46 @@ try {
     exit 1
 } catch {}
 
-# Fallback: regex on binary content (may have false positives from deleted rows
-# but very unlikely in practice — SQLite typically reuses pages)
+# Fallback: streamed regex scan (don't load entire DB into memory).
+# Read the file in 64KB chunks, decode each chunk as UTF-8, and search
+# for the JSON keys. We keep a small overlap buffer between chunks to
+# handle keys that straddle chunk boundaries.
+#
+# Caveats acknowledged (vs SQLite query):
+#   - matches deleted-but-not-vacuumed rows (very unlikely to false-positive
+#     in practice because cc-switch always replaces is_current entries)
+#   - cross-row matches possible (also very rare)
+# But in exchange we don't load the whole DB to memory.
 try {
     $fs = [IO.FileStream]::new($DbPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
-    $bytes = New-Object byte[] $fs.Length
-    [void]$fs.Read($bytes, 0, $fs.Length)
-    $fs.Close()
+    try {
+        $chunkSize = 65536
+        $overlap = 256  # large enough to span the longest expected JSON fragment
+        $buffer = New-Object byte[] $chunkSize
+        $tail = ""  # carries the last `overlap` decoded chars across iterations
+        $foundUrl = $false
+        $foundKey = $false
+        $urlPat = [regex]'"ANTHROPIC_BASE_URL"\s*:\s*"([^"]{6,})"'
+        $keyPat1 = [regex]'"ANTHROPIC_AUTH_TOKEN"\s*:\s*"([^"]{6,})"'
+        $keyPat2 = [regex]'"ANTHROPIC_API_KEY"\s*:\s*"([^"]{6,})"'
 
-    $text = [Text.Encoding]::UTF8.GetString($bytes)
-
-    $url = [regex]::Match($text, '"ANTHROPIC_BASE_URL"\s*:\s*"([^"]+)"')
-    $key = [regex]::Match($text, '"ANTHROPIC_AUTH_TOKEN"\s*:\s*"([^"]+)"')
-    if (-not $key.Success) {
-        $key = [regex]::Match($text, '"ANTHROPIC_API_KEY"\s*:\s*"([^"]+)"')
-    }
-
-    if ($url.Success -and $key.Success -and $url.Groups[1].Value.Length -gt 5 -and $key.Groups[1].Value.Length -gt 5) {
-        exit 0
+        while ($true) {
+            $n = $fs.Read($buffer, 0, $chunkSize)
+            if ($n -le 0) { break }
+            $chunkText = [Text.Encoding]::UTF8.GetString($buffer, 0, $n)
+            $window = $tail + $chunkText
+            if (-not $foundUrl -and $urlPat.IsMatch($window)) { $foundUrl = $true }
+            if (-not $foundKey -and ($keyPat1.IsMatch($window) -or $keyPat2.IsMatch($window))) { $foundKey = $true }
+            if ($foundUrl -and $foundKey) { exit 0 }
+            # Carry the tail to handle keys that straddle the chunk boundary
+            if ($window.Length -gt $overlap) {
+                $tail = $window.Substring($window.Length - $overlap)
+            } else {
+                $tail = $window
+            }
+        }
+    } finally {
+        $fs.Close()
     }
 } catch {}
 

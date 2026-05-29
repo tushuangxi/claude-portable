@@ -310,12 +310,25 @@ REM a pre-existing system install. Migrate its contents into our
 REM portable folder BEFORE replacing with a junction. Never rd /s /q
 REM a real user directory — that would destroy their data.
 if exist "%LINK%\*" (
-  echo   [migrate] Moving existing %LINK% into portable folder...
-  xcopy /e /i /y /q "%LINK%" "%TARGET%" >nul 2>&1
-  rd /s /q "%LINK%" 2>nul
+  REM Only migrate if portable target is empty. If it already has data,
+  REM rename system dir as backup instead of merging — merging would
+  REM let system files clobber portable files.
+  set "TARGET_EMPTY=1"
+  for /f %%X in ('dir /b /a "%TARGET%" 2^>nul ^| findstr /r ".*"') do set "TARGET_EMPTY=0"
+  if "!TARGET_EMPTY!"=="1" (
+    echo   [migrate] Moving existing %LINK% into portable folder...
+    xcopy /e /i /y /q "%LINK%" "%TARGET%" >nul 2>&1
+    rd /s /q "%LINK%" 2>nul
+  ) else (
+    REM Portable target not empty — back up system dir with timestamp
+    for /f "tokens=2 delims==" %%T in ('wmic os get LocalDateTime /value 2^>nul ^| findstr "LocalDateTime"') do set "TS=%%T"
+    if not defined TS set "TS=%RANDOM%%RANDOM%"
+    echo   [warn] Portable target not empty, backing up system dir...
+    ren "%LINK%" "%~n1.before-portable.!TS:~0,14!" >nul 2>&1
+  )
   if exist "%LINK%" (
-    REM Could not remove — files may be locked. Rename instead.
-    ren "%LINK%" "%~n1.bak" >nul 2>&1
+    REM Could not remove or rename — files may be locked. Last-resort rename.
+    ren "%LINK%" "%~n1.bak.%RANDOM%" >nul 2>&1
   )
 )
 if exist "%LINK%" rd "%LINK%" 2>nul
