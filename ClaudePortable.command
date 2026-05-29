@@ -212,15 +212,25 @@ has_valid_config() {
         return $?
     fi
     CCS_DB="$CCS_DB" python3 - <<'PYEOF' 2>/dev/null
-import os, re, sys
+import sqlite3, json, os, sys
+# Use SQLite query instead of regex on raw bytes:
+#   - regex would match deleted-but-not-vacuumed rows (SQLite lazy delete)
+#   - it would also match across rows, returning false positive
+#   - reading the whole file as text wastes memory on large DBs
 try:
-    with open(os.environ['CCS_DB'], 'rb') as f:
-        text = f.read().decode('utf-8', errors='replace')
-    url = re.search(r'"ANTHROPIC_BASE_URL"\s*:\s*"([^"]+)"', text)
-    key = re.search(r'"ANTHROPIC_AUTH_TOKEN"\s*:\s*"([^"]+)"', text)
-    if not key:
-        key = re.search(r'"ANTHROPIC_API_KEY"\s*:\s*"([^"]+)"', text)
-    if url and key and len(url.group(1)) > 5 and len(key.group(1)) > 5:
+    db = sqlite3.connect(os.environ['CCS_DB'], timeout=2.0)
+    row = db.execute(
+        "SELECT settings_config FROM providers "
+        "WHERE app_type='claude' AND is_current=1 LIMIT 1"
+    ).fetchone()
+    db.close()
+    if not row:
+        sys.exit(1)
+    cfg = json.loads(row[0])
+    env = cfg.get('env', {})
+    url = env.get('ANTHROPIC_BASE_URL', '')
+    key = env.get('ANTHROPIC_AUTH_TOKEN', '') or env.get('ANTHROPIC_API_KEY', '')
+    if isinstance(url, str) and isinstance(key, str) and len(url) > 5 and len(key) > 5:
         sys.exit(0)
 except Exception:
     pass
@@ -241,12 +251,18 @@ if ! has_valid_config; then
     WE_STARTED_CCS=1
 
     echo "  等待配置..."
+    # 5 分钟最长等待。每 30 秒打一个进度提示，让用户知道脚本还活着。
     for i in $(seq 1 150); do
         sleep 2
         if has_valid_config; then
+            echo ""
             echo "  [ok] 检测到 Provider，继续启动"
             sleep 1
             break
+        fi
+        # 每 15 次（30 秒）打一个点
+        if [ $((i % 15)) -eq 0 ]; then
+            printf "."
         fi
     done
 
@@ -270,7 +286,10 @@ read_config() {
         result=$(CCS_DB="$CCS_DB" python3 - <<'PYEOF' 2>/dev/null
 import sqlite3, json, os, sys
 try:
-    db = sqlite3.connect(os.environ['CCS_DB'])
+    # timeout=2.0: don't block more than 2s on a writer lock.
+    # The outer bash loop retries 3 times so total worst-case is ~6s,
+    # vs the SQLite default of 5s × 3 = 15s.
+    db = sqlite3.connect(os.environ['CCS_DB'], timeout=2.0)
     row = db.execute("SELECT settings_config FROM providers WHERE app_type='claude' AND is_current=1 LIMIT 1").fetchone()
     db.close()
     if row:
@@ -286,8 +305,10 @@ except Exception:
 PYEOF
 )
         if [ -n "$result" ]; then
-            export ANTHROPIC_BASE_URL=$(echo "$result" | head -1)
-            export ANTHROPIC_AUTH_TOKEN=$(echo "$result" | tail -1)
+            # 用 printf 而不是 echo 避免反斜杠转义问题
+            # （某些 echo 实现会解释 \n、\t 等）
+            export ANTHROPIC_BASE_URL=$(printf '%s\n' "$result" | head -1)
+            export ANTHROPIC_AUTH_TOKEN=$(printf '%s\n' "$result" | tail -1)
             unset ANTHROPIC_API_KEY
             return 0
         fi
@@ -328,6 +349,13 @@ echo ""
 
 "$BIN_DIR/claude" "$@"
 CLAUDE_EXIT=$?
+
+# 提前清理：删 symlink 和 run lock（不依赖 trap 在 read 之后才跑）。
+# 这样即便用户在 read -p 等待时拔 U 盘，主目录也已经干净，
+# 不会留下指向不可达 USB 路径的 broken symlink。
+[ -L "$SYS_CCS" ] && rm "$SYS_CCS" 2>/dev/null
+[ -L "$SYS_CLAUDE" ] && rm "$SYS_CLAUDE" 2>/dev/null
+[ -f "$RUN_LOCK" ] && rm -f "$RUN_LOCK"
 
 # 如果 claude 异常退出，留窗口给用户看错误
 if [ $CLAUDE_EXIT -ne 0 ]; then

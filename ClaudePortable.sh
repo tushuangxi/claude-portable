@@ -196,15 +196,23 @@ has_valid_config() {
         return $?
     fi
     CCS_DB="$CCS_DB" python3 - <<'PYEOF' 2>/dev/null
-import os, re, sys
+import sqlite3, json, os, sys
+# Use proper SQLite query (regex on raw bytes matched deleted rows
+# and false positives across rows).
 try:
-    with open(os.environ['CCS_DB'], 'rb') as f:
-        text = f.read().decode('utf-8', errors='replace')
-    url = re.search(r'"ANTHROPIC_BASE_URL"\s*:\s*"([^"]+)"', text)
-    key = re.search(r'"ANTHROPIC_AUTH_TOKEN"\s*:\s*"([^"]+)"', text)
-    if not key:
-        key = re.search(r'"ANTHROPIC_API_KEY"\s*:\s*"([^"]+)"', text)
-    if url and key and len(url.group(1)) > 5 and len(key.group(1)) > 5:
+    db = sqlite3.connect(os.environ['CCS_DB'], timeout=2.0)
+    row = db.execute(
+        "SELECT settings_config FROM providers "
+        "WHERE app_type='claude' AND is_current=1 LIMIT 1"
+    ).fetchone()
+    db.close()
+    if not row:
+        sys.exit(1)
+    cfg = json.loads(row[0])
+    env = cfg.get('env', {})
+    url = env.get('ANTHROPIC_BASE_URL', '')
+    key = env.get('ANTHROPIC_AUTH_TOKEN', '') or env.get('ANTHROPIC_API_KEY', '')
+    if isinstance(url, str) and isinstance(key, str) and len(url) > 5 and len(key) > 5:
         sys.exit(0)
 except Exception:
     pass
@@ -233,9 +241,13 @@ if ! has_valid_config; then
     for i in $(seq 1 150); do
         sleep 2
         if has_valid_config; then
+            echo ""
             echo "  [ok] 检测到 Provider，继续启动"
             sleep 1
             break
+        fi
+        if [ $((i % 15)) -eq 0 ]; then
+            printf "."
         fi
     done
 
@@ -258,7 +270,8 @@ read_config() {
         result=$(CCS_DB="$CCS_DB" python3 - <<'PYEOF' 2>/dev/null
 import sqlite3, json, os, sys
 try:
-    db = sqlite3.connect(os.environ['CCS_DB'])
+    # timeout=2.0: don't block on writer lock; outer loop retries.
+    db = sqlite3.connect(os.environ['CCS_DB'], timeout=2.0)
     row = db.execute("SELECT settings_config FROM providers WHERE app_type='claude' AND is_current=1 LIMIT 1").fetchone()
     db.close()
     if row:
@@ -274,8 +287,9 @@ except Exception:
 PYEOF
 )
         if [ -n "$result" ]; then
-            export ANTHROPIC_BASE_URL=$(echo "$result" | head -1)
-            export ANTHROPIC_AUTH_TOKEN=$(echo "$result" | tail -1)
+            # printf instead of echo to avoid backslash interpretation
+            export ANTHROPIC_BASE_URL=$(printf '%s\n' "$result" | head -1)
+            export ANTHROPIC_AUTH_TOKEN=$(printf '%s\n' "$result" | tail -1)
             unset ANTHROPIC_API_KEY
             return 0
         fi
