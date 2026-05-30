@@ -21,6 +21,20 @@ if [ "${1:-}" = "--unlock" ]; then
     exit 0
 fi
 
+# 处理 --config 参数（随时打开配置中心）
+if [ "${1:-}" = "--config" ]; then
+    CONFIG_SERVER="$SCRIPT_DIR/lib/config_server.py"
+    if command -v python3 &>/dev/null && [ -f "$CONFIG_SERVER" ]; then
+        echo "  打开配置中心 http://127.0.0.1:17580 ..."
+        exec python3 "$CONFIG_SERVER"
+    elif [ -x "$SCRIPT_DIR/bin/linux-x64/cc-switch" ]; then
+        exec "$SCRIPT_DIR/bin/linux-x64/cc-switch"
+    else
+        echo "  [!] 未找到 python3 或 cc-switch"
+        exit 1
+    fi
+fi
+
 # Banner
 GOLD='\033[38;5;220m'
 AMBER='\033[38;5;214m'
@@ -270,17 +284,29 @@ if ! has_valid_config; then
     echo "  首次运行 - 配置 API"
     echo "═══════════════════════════════════════════"
     echo ""
-    echo "  正在打开 CC Switch GUI..."
-    echo "  添加一个 Provider 并保存（无需关闭 CC Switch）"
-    echo ""
-    if [ -z "$DISPLAY" ] && [ -z "$WAYLAND_DISPLAY" ]; then
-        echo "  [!] 未检测到图形界面（DISPLAY 未设置）"
-        echo "  请在带图形界面的环境运行，或在另一台机器配置后复制 DB 过来"
-        exit 1
+    CONFIG_SERVER="$LIB_DIR/config_server.py"
+    if command -v python3 &>/dev/null && [ -f "$CONFIG_SERVER" ]; then
+        # 优先用配置中心（图文引导）。无图形界面时它仍能跑——
+        # 用户可在另一台机器浏览器访问，或用 SSH 端口转发。
+        echo "  正在打开配置中心 http://127.0.0.1:17580 ..."
+        echo "  按引导选供应商、填 Key、测试、保存即可。"
+        echo ""
+        python3 "$CONFIG_SERVER" >/dev/null 2>&1 &
+        CC_SWITCH_PID=$!
+        WE_STARTED_CCS=1
+    else
+        echo "  正在打开 CC Switch GUI..."
+        echo "  添加一个 Provider 并保存（无需关闭 CC Switch）"
+        echo ""
+        if [ -z "$DISPLAY" ] && [ -z "$WAYLAND_DISPLAY" ]; then
+            echo "  [!] 未检测到图形界面（DISPLAY 未设置），且无 python3 配置中心"
+            echo "  请安装 python3，或在带图形界面的环境运行，或复制已配置的 DB 过来"
+            exit 1
+        fi
+        "$BIN_DIR/cc-switch" >/dev/null 2>&1 &
+        CC_SWITCH_PID=$!
+        WE_STARTED_CCS=1
     fi
-    "$BIN_DIR/cc-switch" >/dev/null 2>&1 &
-    CC_SWITCH_PID=$!
-    WE_STARTED_CCS=1
 
     echo "  等待配置..."
     for i in $(seq 1 150); do

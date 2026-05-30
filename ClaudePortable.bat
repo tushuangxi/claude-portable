@@ -58,8 +58,31 @@ if not exist "%BIN_DIR%\claude.exe" (
 :: Handle --unlock argument
 :: =============================================
 if /i "%~1"=="--unlock" goto :do_unlock
+if /i "%~1"=="--config" goto :do_config
 
 goto :after_unlock
+
+:do_config
+set "CONFIG_SERVER=%LIB_DIR%\config_server.py"
+if exist "%CONFIG_SERVER%" (
+  where python3 >nul 2>&1 && (
+    echo   Opening config center at http://127.0.0.1:17580 ...
+    python3 "%CONFIG_SERVER%"
+    exit /b 0
+  )
+  where python >nul 2>&1 && (
+    echo   Opening config center at http://127.0.0.1:17580 ...
+    python "%CONFIG_SERVER%"
+    exit /b 0
+  )
+)
+if exist "%BIN_DIR%\cc-switch.exe" (
+  start "" "%BIN_DIR%\cc-switch.exe"
+  exit /b 0
+)
+echo   [!] No python3 and no cc-switch.exe found.
+pause
+exit /b 1
 
 :do_unlock
 if exist "%LOCK_FILE%" del /f /q "%LOCK_FILE%" >nul 2>&1
@@ -206,18 +229,51 @@ call :check_config
 if "!HAS_CONFIG!"=="1" goto :load_config
 
 :: =============================================
-:: First-run: open CC Switch and wait
+:: First-run: prefer config center (python3), fall back to cc-switch GUI
 :: =============================================
 echo.
 echo =====================================
 echo   First Run - Configure API
 echo =====================================
 echo.
-echo   Opening CC Switch GUI...
-echo   Add a Provider and save.
-echo.
-start "" "%BIN_DIR%\cc-switch.exe"
-set "WE_STARTED_CCS=1"
+
+REM Try config center (python3 + lib\config_server.py) first.
+REM It provides a rich browser-based onboarding wizard.
+set "CONFIG_SERVER=%LIB_DIR%\config_server.py"
+set "USED_CONFIG_CENTER=0"
+if exist "%CONFIG_SERVER%" (
+  where python3 >nul 2>&1 && (
+    echo   Opening config center at http://127.0.0.1:17580 ...
+    echo   Follow the wizard: pick provider, paste key, test, save.
+    echo.
+    set "CLAUDE_BROWSER_OPENED=1"
+    start "" /b python3 "%CONFIG_SERVER%"
+    set "WE_STARTED_CCS=1"
+    set "USED_CONFIG_CENTER=1"
+  )
+  if "!USED_CONFIG_CENTER!"=="0" (
+    where python >nul 2>&1 && (
+      echo   Opening config center at http://127.0.0.1:17580 ...
+      echo.
+      set "CLAUDE_BROWSER_OPENED=1"
+      start "" /b python "%CONFIG_SERVER%"
+      set "WE_STARTED_CCS=1"
+      set "USED_CONFIG_CENTER=1"
+    )
+  )
+)
+if "!USED_CONFIG_CENTER!"=="0" (
+  if exist "%BIN_DIR%\cc-switch.exe" (
+    echo   Opening CC Switch GUI...
+    echo   Add a Provider and save.
+    echo.
+    start "" "%BIN_DIR%\cc-switch.exe"
+    set "WE_STARTED_CCS=1"
+  ) else (
+    echo   [!] No python3 and no cc-switch.exe found. Cannot configure.
+    goto :error_cleanup
+  )
+)
 
 echo   Waiting for provider configuration...
 set "WAIT_COUNT=0"
@@ -226,12 +282,20 @@ timeout /t 2 >nul 2>&1
 set /a WAIT_COUNT+=1
 call :check_config
 if "!HAS_CONFIG!"=="1" goto :db_ready
-REM Detect cc-switch death — if user closed it without saving,
-REM bail immediately rather than wait the full 5 minutes.
-tasklist /fi "ImageName eq cc-switch.exe" 2>nul | find /i "cc-switch.exe" >nul
-if !errorlevel! NEQ 0 (
-  echo   [!] CC Switch exited before config saved. Re-run to retry.
-  goto :error_cleanup
+REM Detect config tool death — bail immediately rather than wait 5 min.
+if "!USED_CONFIG_CENTER!"=="1" (
+  REM config_server.py is a python process; check if port is still listening
+  powershell -NoProfile -Command "try{$r=Invoke-WebRequest -Uri 'http://127.0.0.1:17580/api/heartbeat' -UseBasicParsing -TimeoutSec 1;exit 0}catch{exit 1}" >nul 2>&1
+  if !errorlevel! NEQ 0 (
+    echo   [!] Config center exited before config saved. Re-run to retry.
+    goto :error_cleanup
+  )
+) else (
+  tasklist /fi "ImageName eq cc-switch.exe" 2>nul | find /i "cc-switch.exe" >nul
+  if !errorlevel! NEQ 0 (
+    echo   [!] CC Switch exited before config saved. Re-run to retry.
+    goto :error_cleanup
+  )
 )
 if !WAIT_COUNT! GEQ 150 (
   echo   [!] Timeout waiting for provider config.
