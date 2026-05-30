@@ -1,50 +1,65 @@
 # Extract ANTHROPIC_BASE_URL and ANTHROPIC_AUTH_TOKEN from cc-switch.db
-# Usage: powershell -File extract-config.ps1 <db_path> <out_url> <out_key>
+# Writes URL on line 1, key on line 2 to stdout. Exit 0 on success, 1 otherwise.
+#
+# Why stdout instead of temp files: writing the API key to %TEMP%\*.txt
+# leaks it indefinitely if the launcher crashes between write and delete.
+# Windows doesn't clean %TEMP% reliably; some users see files from months ago.
+# Using stdout, the key only lives in process memory.
+#
+# Usage: powershell -File extract-config.ps1 <db_path>
 param(
-    [Parameter(Mandatory=$true)][string]$DbPath,
-    [Parameter(Mandatory=$true)][string]$OutUrl,
-    [Parameter(Mandatory=$true)][string]$OutKey
+    [Parameter(Mandatory=$true)][string]$DbPath
 )
 
 if (-not (Test-Path $DbPath)) { exit 1 }
 
+# Helper: emit URL + key on stdout if both look valid, then exit 0.
+# Force ASCII output via raw byte writes — UTF-8 output without BOM
+# avoids cmd's `for /f` picking up encoding garbage in the first line.
+# API URLs and auth tokens are ASCII anyway.
+function Emit-Pair {
+    param([string]$Url, [string]$Key)
+    if (-not $Url -or -not $Key) { return $false }
+    $u = $Url.Trim()
+    $k = $Key.Trim()
+    if ($u.Length -lt 6 -or $k.Length -lt 6) { return $false }
+    # Refuse multi-line content — defense against injection if cc-switch
+    # ever stored a value containing a newline. cmd's `set "X=..."`
+    # would only get the first line, but we'd rather fail loud.
+    if ($u -match "[\r\n]" -or $k -match "[\r\n]") { return $false }
+    # Reject non-ASCII to avoid encoding mismatches between PS / cmd.
+    # In practice API keys/URLs are ASCII; if not, the user has a bigger
+    # problem than this script.
+    if ($u -match "[^\x20-\x7e]" -or $k -match "[^\x20-\x7e]") { return $false }
+    [Console]::Out.WriteLine($u)
+    [Console]::Out.WriteLine($k)
+    return $true
+}
+
 # ── Strategy 1: System.Data.SQLite (precise SELECT) ──────────────────────────
-# Only available if user has installed sqlite-net or similar.
 try {
     Add-Type -AssemblyName System.Data.SQLite -ErrorAction Stop
     $cs = "Data Source=$DbPath;Read Only=True;"
     $conn = [System.Data.SQLite.SQLiteConnection]::new($cs)
     $conn.Open()
-    $cmd = $conn.CreateCommand()
-    $cmd.CommandText = "SELECT settings_config FROM providers WHERE app_type='claude' AND is_current=1 LIMIT 1"
-    $row = $cmd.ExecuteScalar()
-    $conn.Close()
+    try {
+        $cmd = $conn.CreateCommand()
+        $cmd.CommandText = "SELECT settings_config FROM providers WHERE app_type='claude' AND is_current=1 LIMIT 1"
+        $row = $cmd.ExecuteScalar()
+    } finally {
+        $conn.Close()
+        $conn.Dispose()
+    }
     if ($row) {
         $cfg = $row | ConvertFrom-Json
         $e = $cfg.env
         $url = $e.ANTHROPIC_BASE_URL
         $key = if ($e.ANTHROPIC_AUTH_TOKEN) { $e.ANTHROPIC_AUTH_TOKEN } else { $e.ANTHROPIC_API_KEY }
-        if ($url -and $key) {
-            # Trim defensive: cc-switch may store keys with trailing
-            # whitespace if user pasted with extra characters. set /p
-            # in cmd preserves trailing whitespace, which would break
-            # API calls (404 on URL, auth failure on key).
-            $url = $url.Trim()
-            $key = $key.Trim()
-            if (-not $url -or -not $key) { exit 1 }
-            # set /p in Windows cmd reads until newline. Write a trailing
-            # newline so older cmd versions don't return empty (some cmd
-            # implementations require LF-terminated input for set /p).
-            [IO.File]::WriteAllText($OutUrl, $url + "`n")
-            [IO.File]::WriteAllText($OutKey, $key + "`n")
-            exit 0
-        }
+        if (Emit-Pair $url $key) { exit 0 }
     }
-    exit 1
 } catch {}
 
 # ── Strategy 2: shell out to sqlite3.exe if on PATH ──────────────────────────
-# Git for Windows ships sqlite3.exe; Python users may have it too.
 try {
     $sqlite = Get-Command sqlite3.exe -ErrorAction Stop
     if ($sqlite) {
@@ -55,28 +70,18 @@ try {
             $e = $cfg.env
             $url = $e.ANTHROPIC_BASE_URL
             $key = if ($e.ANTHROPIC_AUTH_TOKEN) { $e.ANTHROPIC_AUTH_TOKEN } else { $e.ANTHROPIC_API_KEY }
-            if ($url -and $key) {
-                $url = $url.Trim()
-                $key = $key.Trim()
-                if (-not $url -or -not $key) { exit 1 }
-                [IO.File]::WriteAllText($OutUrl, $url + "`n")
-                [IO.File]::WriteAllText($OutKey, $key + "`n")
-                exit 0
-            }
+            if (Emit-Pair $url $key) { exit 0 }
         }
     }
 } catch {}
 
-# ── Strategy 3: regex fallback (LAST RESORT, may be inaccurate) ──────────────
+# ── Strategy 3: regex fallback (LAST RESORT) ────────────────────────────────
 #
 # WARNING: this fallback can return STALE credentials when the user has
 # multiple providers in the DB. Reasons:
 #   1. SQLite stores rows in physical page order, not insertion order
 #   2. Deleted-but-not-vacuumed rows still match the regex
 #   3. Picking the "last match" is just a heuristic
-#
-# We also CHECK if multiple providers are present and emit a warning to
-# stderr. The launcher can decide whether to abort or proceed.
 try {
     # Streamed read in 64KB chunks (don't load full DB into memory).
     # Carry up to 4 trailing bytes across iterations so multi-byte UTF-8
@@ -123,16 +128,11 @@ try {
 
     if ($urlMatches.Count -gt 0 -and $keyMatches.Count -gt 0) {
         if ($urlMatches.Count -gt 1 -or $keyMatches.Count -gt 1) {
-            # Surface a warning so the user knows accuracy is degraded.
-            # The CMD wrapper hides stderr so this is mostly for diagnostics.
-            [Console]::Error.WriteLine("[warn] Multiple providers detected; selecting the last-stored one. Install Python or sqlite3.exe for accurate selection.")
+            [Console]::Error.WriteLine("[warn] Multiple providers detected; picking last-stored. Install Python or sqlite3.exe for accurate selection.")
         }
-        $url = $urlMatches[$urlMatches.Count - 1].Groups[1].Value.Trim()
-        $key = $keyMatches[$keyMatches.Count - 1].Groups[1].Value.Trim()
-        if (-not $url -or -not $key) { exit 1 }
-        [IO.File]::WriteAllText($OutUrl, $url + "`n")
-        [IO.File]::WriteAllText($OutKey, $key + "`n")
-        exit 0
+        $url = $urlMatches[$urlMatches.Count - 1].Groups[1].Value
+        $key = $keyMatches[$keyMatches.Count - 1].Groups[1].Value
+        if (Emit-Pair $url $key) { exit 0 }
     }
 } catch {}
 

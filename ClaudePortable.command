@@ -57,20 +57,37 @@ xattr -dr com.apple.quarantine "$BIN_DIR/cc-switch" 2>/dev/null
 
 # ═══════════════════════════════════════════
 # 单实例锁（防止并发运行）
+# 使用 mkdir 而非 touch — mkdir 是原子的，跨平台都靠谱。
+# 双击 .command 触发两次终端启动时（macOS 常见），
+# 之前的 [-f] 检查 + echo PID 是非原子的：两个实例可同时通过检查、
+# 同时写入、互相覆盖 PID、互相清理 symlink。
 # ═══════════════════════════════════════════
-RUN_LOCK="$SCRIPT_DIR/data/.running"
+RUN_LOCK_DIR="$SCRIPT_DIR/data/.running"
 mkdir -p "$SCRIPT_DIR/data"
-if [ -f "$RUN_LOCK" ]; then
-    PREV_PID=$(cat "$RUN_LOCK" 2>/dev/null | head -1 | tr -d '[:space:]')
+
+# stale-lock 检测：如果存在但里面 PID 已死，清理后重试一次
+if [ -d "$RUN_LOCK_DIR" ]; then
+    PREV_PID=""
+    [ -f "$RUN_LOCK_DIR/pid" ] && PREV_PID=$(cat "$RUN_LOCK_DIR/pid" 2>/dev/null | tr -d '[:space:]')
     if [ -n "$PREV_PID" ] && kill -0 "$PREV_PID" 2>/dev/null; then
         echo "  [info] 已有另一个实例正在运行 (PID $PREV_PID)。"
-        echo "  如果错误，请删除：$RUN_LOCK"
+        echo "  如果错误，请删除：$RUN_LOCK_DIR"
         exit 1
     fi
-    # Stale lock — clear
-    rm -f "$RUN_LOCK"
+    # Stale — 先尝试清理
+    rm -rf "$RUN_LOCK_DIR" 2>/dev/null
 fi
-echo $$ > "$RUN_LOCK"
+
+# mkdir 原子操作：成功 = 我们持锁；失败 = 别人正好同时建了。
+if ! mkdir "$RUN_LOCK_DIR" 2>/dev/null; then
+    echo "  [info] 已有另一个实例正在运行 (并发启动)。"
+    echo "  如果错误，请删除：$RUN_LOCK_DIR"
+    exit 1
+fi
+echo $$ > "$RUN_LOCK_DIR/pid"
+
+# 兼容旧 RUN_LOCK 变量名（cleanup 引用）
+RUN_LOCK="$RUN_LOCK_DIR"
 
 # ═══════════════════════════════════════════
 # 便携目录设置
@@ -218,8 +235,8 @@ cleanup() {
     fi
     [ -L "$SYS_CCS" ] && rm "$SYS_CCS" 2>/dev/null
     [ -L "$SYS_CLAUDE" ] && rm "$SYS_CLAUDE" 2>/dev/null
-    # 清理单实例锁
-    [ -f "$RUN_LOCK" ] && rm -f "$RUN_LOCK"
+    # 清理单实例锁（目录形式，原子持锁机制）
+    [ -d "$RUN_LOCK" ] && rm -rf "$RUN_LOCK"
 }
 trap cleanup EXIT INT TERM
 
@@ -289,6 +306,8 @@ if ! has_valid_config; then
 
     echo "  等待配置..."
     # 5 分钟最长等待。每 30 秒打一个进度提示，让用户知道脚本还活着。
+    # 同时检测 cc-switch 进程意外死亡 — 如果死了就立刻报错，
+    # 而不是干等 5 分钟。
     for i in $(seq 1 150); do
         sleep 2
         if has_valid_config; then
@@ -296,6 +315,13 @@ if ! has_valid_config; then
             echo "  [ok] 检测到 Provider，继续启动"
             sleep 1
             break
+        fi
+        # cc-switch 进程已经退出？用户关掉了，或者 GUI 崩了。
+        if ! kill -0 "$CC_SWITCH_PID" 2>/dev/null; then
+            echo ""
+            echo "  [!] CC Switch 已退出但仍未检测到 Provider 配置。"
+            echo "  请重新运行并完成配置。"
+            exit 1
         fi
         # 每 15 次（30 秒）打一个点
         if [ $((i % 15)) -eq 0 ]; then
@@ -397,7 +423,7 @@ CLAUDE_EXIT=$?
 # 不会留下指向不可达 USB 路径的 broken symlink。
 [ -L "$SYS_CCS" ] && rm "$SYS_CCS" 2>/dev/null
 [ -L "$SYS_CLAUDE" ] && rm "$SYS_CLAUDE" 2>/dev/null
-[ -f "$RUN_LOCK" ] && rm -f "$RUN_LOCK"
+[ -d "$RUN_LOCK" ] && rm -rf "$RUN_LOCK"
 
 # 如果 claude 异常退出，留窗口给用户看错误
 if [ $CLAUDE_EXIT -ne 0 ]; then

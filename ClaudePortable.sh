@@ -52,20 +52,29 @@ fi
 chmod +x "$BIN_DIR/claude" "$BIN_DIR/cc-switch" 2>/dev/null
 
 # ═══════════════════════════════════════════
-# 单实例锁（防止并发运行）
+# 单实例锁（原子 mkdir 持锁）
 # ═══════════════════════════════════════════
-RUN_LOCK="$SCRIPT_DIR/data/.running"
+RUN_LOCK_DIR="$SCRIPT_DIR/data/.running"
 mkdir -p "$SCRIPT_DIR/data"
-if [ -f "$RUN_LOCK" ]; then
-    PREV_PID=$(cat "$RUN_LOCK" 2>/dev/null | head -1 | tr -d '[:space:]')
+
+if [ -d "$RUN_LOCK_DIR" ]; then
+    PREV_PID=""
+    [ -f "$RUN_LOCK_DIR/pid" ] && PREV_PID=$(cat "$RUN_LOCK_DIR/pid" 2>/dev/null | tr -d '[:space:]')
     if [ -n "$PREV_PID" ] && kill -0 "$PREV_PID" 2>/dev/null; then
-        echo "  [info] 已有另一个实例正在运行 (PID $PREV_PID)。"
-        echo "  如果错误，请删除：$RUN_LOCK"
+        echo "  [info] Another instance is already running (PID $PREV_PID)."
+        echo "  If incorrect, remove: $RUN_LOCK_DIR"
         exit 1
     fi
-    rm -f "$RUN_LOCK"
+    rm -rf "$RUN_LOCK_DIR" 2>/dev/null
 fi
-echo $$ > "$RUN_LOCK"
+
+if ! mkdir "$RUN_LOCK_DIR" 2>/dev/null; then
+    echo "  [info] Another instance is already running (concurrent start)."
+    echo "  If incorrect, remove: $RUN_LOCK_DIR"
+    exit 1
+fi
+echo $$ > "$RUN_LOCK_DIR/pid"
+RUN_LOCK="$RUN_LOCK_DIR"
 
 # ═══════════════════════════════════════════
 # 便携目录设置
@@ -198,8 +207,8 @@ cleanup() {
     fi
     [ -L "$SYS_CCS" ] && rm "$SYS_CCS" 2>/dev/null
     [ -L "$SYS_CLAUDE" ] && rm "$SYS_CLAUDE" 2>/dev/null
-    # 清理单实例锁
-    [ -f "$RUN_LOCK" ] && rm -f "$RUN_LOCK"
+    # 清理单实例锁（dir 形式）
+    [ -d "$RUN_LOCK" ] && rm -rf "$RUN_LOCK"
 }
 trap cleanup EXIT INT TERM
 
@@ -279,6 +288,12 @@ if ! has_valid_config; then
             echo "  [ok] 检测到 Provider，继续启动"
             sleep 1
             break
+        fi
+        # cc-switch 死亡检测：若 GUI 已退出但仍未配好，立即报错。
+        if ! kill -0 "$CC_SWITCH_PID" 2>/dev/null; then
+            echo ""
+            echo "  [!] CC Switch exited before config saved. Re-run to retry."
+            exit 1
         fi
         if [ $((i % 15)) -eq 0 ]; then
             printf "."
@@ -370,6 +385,6 @@ CLAUDE_EXIT=$?
 # 主目录也已干净，不会留下指向不可达 USB 路径的 broken symlink。
 [ -L "$SYS_CCS" ] && rm "$SYS_CCS" 2>/dev/null
 [ -L "$SYS_CLAUDE" ] && rm "$SYS_CLAUDE" 2>/dev/null
-[ -f "$RUN_LOCK" ] && rm -f "$RUN_LOCK"
+[ -d "$RUN_LOCK" ] && rm -rf "$RUN_LOCK"
 
 exit $CLAUDE_EXIT

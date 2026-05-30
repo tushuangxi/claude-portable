@@ -64,26 +64,36 @@ exit /b 0
 :after_unlock
 
 :: =============================================
-:: Single-instance check (best effort)
+:: Single-instance check (atomic via mkdir)
+:: cmd's `mkdir` returns errorlevel 1 if dir exists or can't be made.
+:: This is atomic on NTFS, fixing the previous TOCTOU race where two
+:: concurrent launches could both pass `if exist` then both write PID.
 :: =============================================
 if not exist "%PORTABLE_DATA%" mkdir "%PORTABLE_DATA%" >nul 2>&1
-if not exist "%RUN_LOCK%" goto :run_lock_done
 
-set "PREV_PID="
-for /f "usebackq delims=" %%P in ("%RUN_LOCK%") do if not defined PREV_PID set "PREV_PID=%%P"
-if not defined PREV_PID goto :clear_stale_lock
+:: Stale-lock cleanup: if dir exists but its PID is dead, clear it.
+if exist "%RUN_LOCK%" (
+  set "PREV_PID="
+  if exist "%RUN_LOCK%\pid" (
+    for /f "usebackq delims=" %%P in ("%RUN_LOCK%\pid") do if not defined PREV_PID set "PREV_PID=%%P"
+  )
+  if defined PREV_PID (
+    tasklist /fi "PID eq !PREV_PID!" 2>nul | find "!PREV_PID!" >nul
+    if !errorlevel! EQU 0 (
+      echo   [info] Another instance is already running (PID !PREV_PID!).
+      timeout /t 5 >nul 2>&1
+      exit /b 1
+    )
+  )
+  rd /s /q "%RUN_LOCK%" >nul 2>&1
+)
 
-tasklist /fi "PID eq !PREV_PID!" 2>nul | find "!PREV_PID!" >nul
-if !errorlevel! EQU 0 (
-  echo   [info] Another instance is already running.
+mkdir "%RUN_LOCK%" 2>nul
+if !errorlevel! NEQ 0 (
+  echo   [info] Another instance is already running (concurrent start).
   timeout /t 5 >nul 2>&1
   exit /b 1
 )
-
-:clear_stale_lock
-del /f /q "%RUN_LOCK%" >nul 2>&1
-
-:run_lock_done
 
 :: =============================================
 :: Drive binding check (BEFORE any side effects)
@@ -180,7 +190,7 @@ set "CCS_DB=%PORTABLE_CCS%\cc-switch.db"
 :: CIM API to get the parent (i.e. our cmd.exe) process id.
 for /f "delims=" %%P in ('powershell -NoProfile -Command "(Get-CimInstance Win32_Process -Filter ('ProcessId = ' + $PID)).ParentProcessId" 2^>nul') do set "MY_PID=%%P"
 if not defined MY_PID set "MY_PID=%RANDOM%%RANDOM%"
-echo !MY_PID! > "%RUN_LOCK%"
+echo !MY_PID! > "%RUN_LOCK%\pid"
 
 :: =============================================
 :: Check config exists
@@ -209,6 +219,13 @@ timeout /t 2 >nul 2>&1
 set /a WAIT_COUNT+=1
 call :check_config
 if "!HAS_CONFIG!"=="1" goto :db_ready
+REM Detect cc-switch death — if user closed it without saving,
+REM bail immediately rather than wait the full 5 minutes.
+tasklist /fi "ImageName eq cc-switch.exe" 2>nul | find /i "cc-switch.exe" >nul
+if !errorlevel! NEQ 0 (
+  echo   [!] CC Switch exited before config saved. Re-run to retry.
+  goto :error_cleanup
+)
 if !WAIT_COUNT! GEQ 150 (
   echo   [!] Timeout waiting for provider config.
   goto :error_cleanup
@@ -221,34 +238,26 @@ timeout /t 1 >nul 2>&1
 
 :load_config
 :: =============================================
-:: Read API config
+:: Read API config — capture via stdout (no plaintext API key
+:: in %TEMP% files; previous TMP_URL/TMP_KEY would leak on crash).
+:: extract-config.ps1 writes URL on line 1, key on line 2 (or empty
+:: lines + exit 1 on failure).
 :: =============================================
-set "TMP_URL=%TEMP%\ccs_url_%RANDOM%%RANDOM%.txt"
-set "TMP_KEY=%TEMP%\ccs_key_%RANDOM%%RANDOM%.txt"
 
 if exist "%LIB_DIR%\extract-config.ps1" (
   for /l %%I in (1,1,3) do (
     if "!ANTHROPIC_AUTH_TOKEN!"=="" (
-      powershell -NoProfile -ExecutionPolicy Bypass -File "%LIB_DIR%\extract-config.ps1" "%CCS_DB%" "!TMP_URL!" "!TMP_KEY!" >nul 2>&1
-      if exist "!TMP_URL!" (
-        set /p ANTHROPIC_BASE_URL=<"!TMP_URL!"
-        set /p ANTHROPIC_AUTH_TOKEN=<"!TMP_KEY!"
-        REM Always delete temp files, even if set /p failed.
-        REM These contain the API key; leaving them in %TEMP% is a
-        REM credential leak that Windows may not clean up for weeks.
-        del /f /q "!TMP_URL!" >nul 2>&1
-        del /f /q "!TMP_KEY!" >nul 2>&1
-        echo   [ok] Config loaded
-      ) else (
-        timeout /t 2 >nul 2>&1
+      set "LINE_NUM=0"
+      for /f "usebackq delims=" %%L in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%LIB_DIR%\extract-config.ps1" "%CCS_DB%" 2^>nul`) do (
+        set /a LINE_NUM+=1
+        if "!LINE_NUM!"=="1" set "ANTHROPIC_BASE_URL=%%L"
+        if "!LINE_NUM!"=="2" set "ANTHROPIC_AUTH_TOKEN=%%L"
       )
+      if "!ANTHROPIC_AUTH_TOKEN!"=="" timeout /t 2 >nul 2>&1
     )
   )
+  if not "!ANTHROPIC_AUTH_TOKEN!"=="" echo   [ok] Config loaded
 )
-REM Defense in depth: clean up any stale temp files left from a
-REM crashed previous run (best-effort match by prefix).
-if exist "!TMP_URL!" del /f /q "!TMP_URL!" >nul 2>&1
-if exist "!TMP_KEY!" del /f /q "!TMP_KEY!" >nul 2>&1
 
 if "!ANTHROPIC_AUTH_TOKEN!"=="" (
   echo   [!] Failed to load config.
@@ -296,7 +305,7 @@ if "!WE_STARTED_CCS!"=="1" (
 )
 call :remove_link "%SYS_CCS%"
 call :remove_link "%SYS_CLAUDE%"
-if exist "%RUN_LOCK%" del /f /q "%RUN_LOCK%" >nul 2>&1
+if exist "%RUN_LOCK%" rd /s /q "%RUN_LOCK%" >nul 2>&1
 exit /b 0
 
 :check_config
