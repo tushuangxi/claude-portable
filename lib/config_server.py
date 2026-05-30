@@ -197,6 +197,212 @@ def activate_provider(pid):
 
 
 # ═══════════════════════════════════════════════════════════════
+#  Maintenance features (batch 1): export / import / view / logs /
+#  diagnose / unbind. Shared design with the OpenClaw config center.
+# ═══════════════════════════════════════════════════════════════
+def export_config():
+    """Return the full set of saved providers as a portable JSON blob.
+
+    Keys are included — this is an explicit user-initiated export meant
+    for migrating to another machine, so we don't redact. The UI warns
+    the user the file contains secrets."""
+    out = {"version": 1, "app_type": APP_TYPE, "exported_at": int(time.time()),
+           "providers": []}
+    if not CCS_DB.exists():
+        return out
+    try:
+        db = _connect()
+        rows = db.execute(
+            "SELECT id, name, settings_config, meta, is_current "
+            "FROM providers WHERE app_type=?", (APP_TYPE,)
+        ).fetchall()
+        db.close()
+        for r in rows:
+            out["providers"].append({
+                "id": r[0], "name": r[1],
+                "settings_config": json.loads(r[2] or "{}"),
+                "meta": json.loads(r[3] or "{}"),
+                "is_current": bool(r[4]),
+            })
+    except Exception:
+        pass
+    return out
+
+
+def import_config(blob):
+    """Import providers from an export blob. Upserts by id; preserves the
+    is_current flag from the blob (last one wins). Returns count."""
+    if not isinstance(blob, dict) or not isinstance(blob.get("providers"), list):
+        raise ValueError("无效的配置文件格式")
+    db = _connect()
+    _ensure_schema(db)
+    count = 0
+    current_id = None
+    for p in blob["providers"]:
+        pid = p.get("id") or str(uuid.uuid4())
+        name = p.get("name") or "Imported"
+        settings = p.get("settings_config") or {}
+        meta = p.get("meta") or {}
+        if not settings.get("env"):
+            continue
+        db.execute(
+            "INSERT OR REPLACE INTO providers (id, app_type, name, "
+            "settings_config, created_at, sort_index, meta, is_current) "
+            "VALUES (?,?,?,?,?,?,?,0)",
+            (pid, APP_TYPE, name, json.dumps(settings, ensure_ascii=False),
+             int(time.time() * 1000), 0, json.dumps(meta)),
+        )
+        count += 1
+        if p.get("is_current"):
+            current_id = pid
+    if current_id:
+        db.execute("UPDATE providers SET is_current=0 WHERE app_type=?", (APP_TYPE,))
+        db.execute("UPDATE providers SET is_current=1 WHERE id=? AND app_type=?",
+                   (current_id, APP_TYPE))
+    db.commit()
+    db.close()
+    return count
+
+
+def view_config():
+    """Return the current provider's settings with the API key MASKED.
+    For on-screen display/debugging — never expose the full key in the UI."""
+    cur = read_current()
+    if not cur:
+        return {"configured": False}
+    key = cur.get("api_key", "")
+    masked = (key[:6] + "…" + key[-4:]) if len(key) > 12 else "***"
+    return {
+        "configured": True,
+        "name": cur.get("name"),
+        "base_url": cur.get("base_url"),
+        "model": cur.get("model"),
+        "api_key_masked": masked,
+        "api_key_len": len(key),
+    }
+
+
+def read_logs(max_lines=200):
+    """Tail the most recent Claude session log. claude writes session
+    history under data/.claude/. We surface the newest *.log / *.jsonl
+    tail so users can debug a failed launch without leaving the panel."""
+    claude_dir = DATA_DIR / ".claude"
+    if not claude_dir.exists():
+        return {"available": False, "text": "暂无日志（data/.claude/ 不存在）"}
+    candidates = []
+    try:
+        for p in claude_dir.rglob("*"):
+            if p.is_file() and p.suffix in (".log", ".jsonl", ".txt"):
+                try:
+                    candidates.append((p.stat().st_mtime, p))
+                except OSError:
+                    continue
+    except Exception:
+        pass
+    if not candidates:
+        return {"available": False, "text": "暂无日志文件"}
+    candidates.sort(reverse=True)
+    newest = candidates[0][1]
+    try:
+        # Bounded tail: read at most 256KB from the end.
+        size = newest.stat().st_size
+        with open(newest, "rb") as f:
+            if size > 262144:
+                f.seek(-262144, os.SEEK_END)
+            data = f.read().decode("utf-8", "replace")
+        lines = data.splitlines()[-max_lines:]
+        return {"available": True, "file": newest.name, "text": "\n".join(lines)}
+    except Exception as e:
+        return {"available": False, "text": f"读取日志失败: {e}"}
+
+
+def run_diagnose():
+    """Run a quick environment self-check. Returns a list of (label, ok,
+    detail) tuples for the UI to render as a checklist."""
+    import shutil
+    checks = []
+
+    def add(label, ok, detail=""):
+        checks.append({"label": label, "ok": bool(ok), "detail": detail})
+
+    # 1. config DB present + has a current provider
+    cur = read_current()
+    add("配置已就绪", cur is not None,
+        (cur.get("name") if cur else "未配置任何供应商"))
+    # 2. base_url + key sane
+    if cur:
+        add("Base URL 有效", len(cur.get("base_url", "")) > 8, cur.get("base_url", ""))
+        add("API Key 已填", len(cur.get("api_key", "")) > 5,
+            f"{len(cur.get('api_key',''))} 字符")
+    # 3. claude binary present
+    plat = _platform_dir()
+    claude_bin = PORTABLE_ROOT / "bin" / plat / ("claude.exe" if os.name == "nt" else "claude")
+    add("Claude 二进制存在", claude_bin.exists(), str(claude_bin))
+    # 4. data dir writable
+    try:
+        test = DATA_DIR / ".write_test"
+        test.write_text("x")
+        test.unlink()
+        add("数据目录可写", True, str(DATA_DIR))
+    except Exception as e:
+        add("数据目录可写", False, str(e))
+    # 5. python3 (we're running, so yes) + sqlite3 module
+    add("Python3 运行时", True, sys.version.split()[0])
+    # 6. network reachability (best-effort, 5s)
+    net_ok = False
+    net_detail = "无法连接 api.anthropic.com"
+    try:
+        import ssl
+        ctx = None
+        try:
+            import certifi
+            ctx = ssl.create_default_context(cafile=certifi.where())
+        except Exception:
+            pass
+        u = (cur.get("base_url") if cur and cur.get("base_url") else "https://api.anthropic.com")
+        req = urllib.request.Request(u, method="HEAD")
+        kwargs = {"timeout": 5}
+        if ctx:
+            kwargs["context"] = ctx
+        try:
+            urllib.request.urlopen(req, **kwargs)
+            net_ok = True
+            net_detail = u
+        except urllib.error.HTTPError:
+            net_ok = True  # reached server, any HTTP code proves connectivity
+            net_detail = u
+        except Exception:
+            pass
+    except Exception:
+        pass
+    add("网络连通", net_ok, net_detail)
+    _ = shutil  # silence unused on some platforms
+    return checks
+
+
+def _platform_dir():
+    if os.name == "nt":
+        return "windows-x64"
+    import platform as _p
+    if _p.system() == "Darwin":
+        return "macos-arm64" if _p.machine() == "arm64" else "macos-x64"
+    return "linux-x64"
+
+
+def unbind_device():
+    """Remove the two device-binding lock files (same as launcher --unlock)."""
+    removed = 0
+    for lf in (DATA_DIR / ".lock", CCS_DIR / ".bind"):
+        try:
+            if lf.exists():
+                lf.unlink()
+                removed += 1
+        except Exception:
+            pass
+    return removed
+
+
+# ═══════════════════════════════════════════════════════════════
 #  API key connectivity test
 # ═══════════════════════════════════════════════════════════════
 def test_key(base_url, api_key, model):
@@ -341,6 +547,22 @@ class Handler(BaseHTTPRequestHandler):
                 })
             elif self.path == "/api/heartbeat":
                 self._json({"alive": True})
+            elif self.path == "/api/export":
+                # Served as a downloadable attachment with all providers.
+                body = json.dumps(export_config(), ensure_ascii=False, indent=2).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Disposition",
+                                 'attachment; filename="claude-portable-config.json"')
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.end_headers()
+                self.wfile.write(body)
+            elif self.path == "/api/view":
+                self._json(view_config())
+            elif self.path == "/api/logs":
+                self._json(read_logs())
+            elif self.path == "/api/diagnose":
+                self._json({"checks": run_diagnose()})
             else:
                 self._json({"error": "not found"}, 404)
         except Exception as e:
@@ -368,6 +590,12 @@ class Handler(BaseHTTPRequestHandler):
             elif self.path == "/api/activate":
                 activate_provider(data.get("id", ""))
                 self._json({"ok": True})
+            elif self.path == "/api/import":
+                count = import_config(data)
+                self._json({"ok": True, "count": count})
+            elif self.path == "/api/unbind":
+                removed = unbind_device()
+                self._json({"ok": True, "removed": removed})
             else:
                 self._json({"ok": False, "error": "not found"}, 404)
         except Exception as e:
