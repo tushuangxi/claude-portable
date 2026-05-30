@@ -224,9 +224,11 @@ has_valid_config() {
         local row
         row=$(sqlite3 -readonly "$CCS_DB" \
             "SELECT settings_config FROM providers WHERE app_type='claude' AND is_current=1 LIMIT 1;" 2>/dev/null)
+        # Require a non-empty (>=6 char) value, else an empty value would
+        # false-positive as "configured".
         if [ -n "$row" ] && \
-           printf '%s' "$row" | grep -q '"ANTHROPIC_BASE_URL"' && \
-           printf '%s' "$row" | grep -qE '"ANTHROPIC_(AUTH_TOKEN|API_KEY)"'; then
+           printf '%s' "$row" | grep -qE '"ANTHROPIC_BASE_URL"[[:space:]]*:[[:space:]]*"[^"]{6,}"' && \
+           printf '%s' "$row" | grep -qE '"ANTHROPIC_(AUTH_TOKEN|API_KEY)"[[:space:]]*:[[:space:]]*"[^"]{6,}"'; then
             return 0
         fi
         return 1
@@ -310,13 +312,10 @@ fi
 # 从 DB 读取 API 配置
 # ═══════════════════════════════════════════
 read_config() {
-    if ! command -v python3 &>/dev/null; then
-        echo "  [!] 需要 python3 读取配置"
-        return 1
-    fi
-    local result attempt
-    for attempt in 1 2 3; do
-        result=$(CCS_DB="$CCS_DB" python3 - <<'PYEOF' 2>/dev/null
+    if command -v python3 &>/dev/null; then
+        local result attempt
+        for attempt in 1 2 3; do
+            result=$(CCS_DB="$CCS_DB" python3 - <<'PYEOF' 2>/dev/null
 import sqlite3, json, os, sys
 try:
     # timeout=2.0: don't block on writer lock; outer loop retries.
@@ -338,15 +337,42 @@ except Exception:
     pass
 PYEOF
 )
-        if [ -n "$result" ]; then
-            # printf instead of echo to avoid backslash interpretation
-            export ANTHROPIC_BASE_URL=$(printf '%s\n' "$result" | head -1)
-            export ANTHROPIC_AUTH_TOKEN=$(printf '%s\n' "$result" | tail -1)
-            unset ANTHROPIC_API_KEY
-            return 0
-        fi
-        sleep 1
-    done
+            if [ -n "$result" ]; then
+                export ANTHROPIC_BASE_URL=$(printf '%s\n' "$result" | head -1)
+                export ANTHROPIC_AUTH_TOKEN=$(printf '%s\n' "$result" | tail -1)
+                unset ANTHROPIC_API_KEY
+                return 0
+            fi
+            sleep 1
+        done
+        return 1
+    fi
+
+    if command -v sqlite3 &>/dev/null; then
+        local row attempt
+        for attempt in 1 2 3; do
+            row=$(sqlite3 -readonly "$CCS_DB" \
+                "SELECT settings_config FROM providers WHERE app_type='claude' AND is_current=1 LIMIT 1;" 2>/dev/null)
+            if [ -n "$row" ]; then
+                local bu ak
+                bu=$(printf '%s' "$row" | sed -nE 's/.*"ANTHROPIC_BASE_URL"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' | head -1)
+                ak=$(printf '%s' "$row" | sed -nE 's/.*"ANTHROPIC_AUTH_TOKEN"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' | head -1)
+                [ -z "$ak" ] && ak=$(printf '%s' "$row" | sed -nE 's/.*"ANTHROPIC_API_KEY"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' | head -1)
+                bu=$(printf '%s' "$bu" | awk '{$1=$1};1')
+                ak=$(printf '%s' "$ak" | awk '{$1=$1};1')
+                if [ -n "$bu" ] && [ -n "$ak" ]; then
+                    export ANTHROPIC_BASE_URL="$bu"
+                    export ANTHROPIC_AUTH_TOKEN="$ak"
+                    unset ANTHROPIC_API_KEY
+                    return 0
+                fi
+            fi
+            sleep 1
+        done
+        return 1
+    fi
+
+    echo "  [!] need python3 or sqlite3 to read config"
     return 1
 }
 

@@ -252,9 +252,10 @@ has_valid_config() {
         local row
         row=$(sqlite3 -readonly "$CCS_DB" \
             "SELECT settings_config FROM providers WHERE app_type='claude' AND is_current=1 LIMIT 1;" 2>/dev/null)
+        # 要求 key 后面跟非空字符串值（>=6 字符），否则空值会误判已配置
         if [ -n "$row" ] && \
-           printf '%s' "$row" | grep -q '"ANTHROPIC_BASE_URL"' && \
-           printf '%s' "$row" | grep -qE '"ANTHROPIC_(AUTH_TOKEN|API_KEY)"'; then
+           printf '%s' "$row" | grep -qE '"ANTHROPIC_BASE_URL"[[:space:]]*:[[:space:]]*"[^"]{6,}"' && \
+           printf '%s' "$row" | grep -qE '"ANTHROPIC_(AUTH_TOKEN|API_KEY)"[[:space:]]*:[[:space:]]*"[^"]{6,}"'; then
             return 0
         fi
         return 1
@@ -339,14 +340,11 @@ fi
 # 从 DB 读取 API 配置
 # ═══════════════════════════════════════════
 read_config() {
-    if ! command -v python3 &>/dev/null; then
-        echo "  [!] 需要 python3 读取配置"
-        return 1
-    fi
-    # Retry up to 3 times in case DB is being written
-    local result attempt
-    for attempt in 1 2 3; do
-        result=$(CCS_DB="$CCS_DB" python3 - <<'PYEOF' 2>/dev/null
+    # python3 路径（优先，最准确）
+    if command -v python3 &>/dev/null; then
+        local result attempt
+        for attempt in 1 2 3; do
+            result=$(CCS_DB="$CCS_DB" python3 - <<'PYEOF' 2>/dev/null
 import sqlite3, json, os, sys
 try:
     # timeout=2.0: don't block more than 2s on a writer lock.
@@ -372,16 +370,49 @@ except Exception:
     pass
 PYEOF
 )
-        if [ -n "$result" ]; then
-            # 用 printf 而不是 echo 避免反斜杠转义问题
-            # （某些 echo 实现会解释 \n、\t 等）
-            export ANTHROPIC_BASE_URL=$(printf '%s\n' "$result" | head -1)
-            export ANTHROPIC_AUTH_TOKEN=$(printf '%s\n' "$result" | tail -1)
-            unset ANTHROPIC_API_KEY
-            return 0
-        fi
-        sleep 1
-    done
+            if [ -n "$result" ]; then
+                # 用 printf 而不是 echo 避免反斜杠转义问题
+                # （某些 echo 实现会解释 \n、\t 等）
+                export ANTHROPIC_BASE_URL=$(printf '%s\n' "$result" | head -1)
+                export ANTHROPIC_AUTH_TOKEN=$(printf '%s\n' "$result" | tail -1)
+                unset ANTHROPIC_API_KEY
+                return 0
+            fi
+            sleep 1
+        done
+        return 1
+    fi
+
+    # sqlite3 CLI fallback (macOS 自带 /usr/bin/sqlite3)。
+    # 不依赖 python3，但需要手工解析 JSON。
+    if command -v sqlite3 &>/dev/null; then
+        local row attempt
+        for attempt in 1 2 3; do
+            row=$(sqlite3 -readonly "$CCS_DB" \
+                "SELECT settings_config FROM providers WHERE app_type='claude' AND is_current=1 LIMIT 1;" 2>/dev/null)
+            if [ -n "$row" ]; then
+                # 极简 JSON 解析：只抽 ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN
+                # （实际 row 是 cfg.settings_config，里面是 {"env":{...}}）
+                local bu ak
+                bu=$(printf '%s' "$row" | sed -nE 's/.*"ANTHROPIC_BASE_URL"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' | head -1)
+                ak=$(printf '%s' "$row" | sed -nE 's/.*"ANTHROPIC_AUTH_TOKEN"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' | head -1)
+                [ -z "$ak" ] && ak=$(printf '%s' "$row" | sed -nE 's/.*"ANTHROPIC_API_KEY"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' | head -1)
+                # 去前后空白
+                bu=$(printf '%s' "$bu" | awk '{$1=$1};1')
+                ak=$(printf '%s' "$ak" | awk '{$1=$1};1')
+                if [ -n "$bu" ] && [ -n "$ak" ]; then
+                    export ANTHROPIC_BASE_URL="$bu"
+                    export ANTHROPIC_AUTH_TOKEN="$ak"
+                    unset ANTHROPIC_API_KEY
+                    return 0
+                fi
+            fi
+            sleep 1
+        done
+        return 1
+    fi
+
+    echo "  [!] 需要 python3 或 sqlite3 读取配置"
     return 1
 }
 
