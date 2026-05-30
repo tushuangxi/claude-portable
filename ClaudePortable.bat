@@ -41,6 +41,13 @@ if "%SCRIPT_DIR_PS:~-1%"=="\" set "SCRIPT_DIR_PS=%SCRIPT_DIR_PS:~0,-1%"
 set "SYS_CCS=%USERPROFILE%\.cc-switch"
 set "SYS_CLAUDE=%USERPROFILE%\.claude"
 
+REM Prepend our bin dir to PATH so the bundled sqlite3.exe is visible to
+REM extract-config.ps1 / check-config.ps1 (they call `Get-Command
+REM sqlite3.exe`, which only searches PATH). Without this, the bundled
+REM sqlite3.exe is dead weight and the config readers fall straight
+REM through to the unreliable regex fallback.
+set "PATH=%BIN_DIR%;%PATH%"
+
 if not exist "%BIN_DIR%\claude.exe" (
   echo [ERROR] Claude Code not found
   pause
