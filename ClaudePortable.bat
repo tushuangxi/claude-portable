@@ -138,13 +138,11 @@ if not exist "%PORTABLE_DATA%" mkdir "%PORTABLE_DATA%"
 if not exist "%PORTABLE_CCS%" mkdir "%PORTABLE_CCS%"
 if not exist "%PORTABLE_CLAUDE%" mkdir "%PORTABLE_CLAUDE%"
 
-:: Migrate existing system data into portable folder (one-time)
-if exist "%SYS_CCS%\cc-switch.db" (
-  if not exist "%PORTABLE_CCS%\cc-switch.db" (
-    echo   [migrate] Copying existing cc-switch data into portable folder...
-    xcopy /e /i /y /q "%SYS_CCS%" "%PORTABLE_CCS%" >nul 2>&1
-  )
-)
+:: ensure_link below handles the system-data migration in a single pass:
+:: it copies system data when portable is empty and backs up otherwise.
+:: We removed the previous separate "migrate" xcopy that ran before
+:: ensure_link because it would leave both system + portable populated,
+:: forcing ensure_link into the "backup" branch unnecessarily.
 
 :: =============================================
 :: Create junctions (or symlinks if cross-volume)
@@ -165,11 +163,12 @@ if !errorlevel! NEQ 0 (
 
 set "CCS_DB=%PORTABLE_CCS%\cc-switch.db"
 
-:: Write run-lock now that we own the session
-:: %~1 was a bug — it's the first CLI arg, not the PID.
-:: Use a unique identifier: the cmd.exe process title or a timestamp.
-:: Windows cmd doesn't have $$ (PID), but we can get it via wmic.
-for /f "tokens=2 delims==" %%P in ('wmic process where "Name='cmd.exe' and CommandLine like '%%ClaudePortable%%'" get ProcessId /value 2^>nul ^| findstr "ProcessId"') do set "MY_PID=%%P"
+:: Write run-lock now that we own the session.
+:: We need cmd.exe's PID (this script's host), not PowerShell's
+:: (which exits immediately, making the lock useless for stale-detection).
+:: wmic was deprecated and removed in Windows 11 24H2+; use PowerShell's
+:: CIM API to get the parent (i.e. our cmd.exe) process id.
+for /f "delims=" %%P in ('powershell -NoProfile -Command "(Get-CimInstance Win32_Process -Filter ('ProcessId = ' + $PID)).ParentProcessId" 2^>nul') do set "MY_PID=%%P"
 if not defined MY_PID set "MY_PID=%RANDOM%%RANDOM%"
 echo !MY_PID! > "%RUN_LOCK%"
 
@@ -326,13 +325,25 @@ if exist "%LINK%\*" (
   if "!TARGET_EMPTY!"=="1" (
     echo   [migrate] Moving existing %LINK% into portable folder...
     xcopy /e /i /y /q "%LINK%" "%TARGET%" >nul 2>&1
-    rd /s /q "%LINK%" 2>nul
+    REM CRITICAL: only rd if xcopy actually succeeded.
+    REM xcopy returns 0 on success, 1-5 on partial/full failure.
+    REM Previously rd ran unconditionally → on disk-full or locked
+    REM file, user's data was destroyed.
+    if !errorlevel! EQU 0 (
+      rd /s /q "%LINK%" 2>nul
+    ) else (
+      echo   [ERROR] xcopy failed (code !errorlevel!^), keeping %LINK% intact
+      exit /b 1
+    )
   ) else (
-    REM Portable target not empty — back up system dir with timestamp
-    for /f "tokens=2 delims==" %%T in ('wmic os get LocalDateTime /value 2^>nul ^| findstr "LocalDateTime"') do set "TS=%%T"
+    REM Portable target not empty — back up system dir with timestamp.
+    REM wmic was removed in Windows 11 24H2+. Use PowerShell to get
+    REM the local time. Format: yyyyMMddHHmmss (14 chars), matching
+    REM the previous wmic LocalDateTime layout.
+    for /f "delims=" %%T in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMddHHmmss" 2^>nul') do set "TS=%%T"
     if not defined TS set "TS=%RANDOM%%RANDOM%"
     echo   [warn] Portable target not empty, backing up system dir...
-    ren "%LINK%" "%~n1.before-portable.!TS:~0,14!" >nul 2>&1
+    ren "%LINK%" "%~n1.before-portable.!TS!" >nul 2>&1
   )
   if exist "%LINK%" (
     REM Could not remove or rename — files may be locked. Last-resort rename.

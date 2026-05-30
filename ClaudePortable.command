@@ -119,21 +119,12 @@ if [ "$LOCK_PRESENT" = "1" ] && [ -f "$LIB_DIR/binding.sh" ]; then
     fi
 fi
 
-# 一次性迁移：把系统已有的数据复制到便携包
-migrate_dir() {
-    local src="$1" dst="$2"
-    if [ -d "$src" ] && [ ! -L "$src" ]; then
-        # src 是真目录（不是符号链接），且有内容 → 迁移
-        if [ -n "$(ls -A "$src" 2>/dev/null)" ] && [ -z "$(ls -A "$dst" 2>/dev/null)" ]; then
-            echo "  [migrate] 复制系统现有数据到便携包: $src → $dst"
-            cp -a "$src/." "$dst/" 2>/dev/null
-        fi
-    fi
-}
-migrate_dir "$SYS_CCS" "$PORTABLE_CCS"
-migrate_dir "$SYS_CLAUDE" "$PORTABLE_CLAUDE"
-
-# 创建符号链接：~/.cc-switch → 便携包/data/.cc-switch
+# 注意：之前这里有一个 `migrate_dir`，它先把 ~/.cc-switch 拷到便携包，
+# 然后又调 `ensure_symlink`。结果是 ensure_symlink 看到便携包有数据、
+# 系统目录也有数据 → 走 "backup system dir" 分支，把 ~/.cc-switch
+# 重命名为 .before-portable.<timestamp>。这是噪声不是数据丢失，但用户
+# 体验差。改为单路径：直接调 ensure_symlink，让它一气呵成处理迁移、
+# 拷贝、链接。
 ensure_symlink() {
     local link="$1" target="$2"
     # 已经是指向目标的符号链接 → 幂等
@@ -151,7 +142,21 @@ ensure_symlink() {
         if [ -n "$(ls -A "$link" 2>/dev/null)" ]; then
             if [ -z "$(ls -A "$target" 2>/dev/null)" ]; then
                 echo "  [migrate] $link → $target"
-                cp -a "$link/." "$target/" 2>/dev/null
+                # 重要：cp 失败时绝不能删源数据。
+                # 之前的版本是 `cp -a ... 2>/dev/null` 然后 rm -rf，
+                # 如果 cp 因磁盘满/权限/文件锁部分失败，会永久丢失用户数据。
+                local cp_err
+                cp_err=$(mktemp -t claude-cp.XXXXXX 2>/dev/null) || cp_err="/tmp/claude-cp.$$"
+                if cp -a "$link/." "$target/" 2>"$cp_err"; then
+                    rm -f "$cp_err"
+                else
+                    echo "  [ERROR] 迁移失败，保留系统目录不删除：$link"
+                    [ -s "$cp_err" ] && sed 's/^/    /' "$cp_err" >&2
+                    rm -f "$cp_err"
+                    # 系统目录还在，便携包没数据 → 直接退出，不创建符号链接
+                    # 让用户手动决断比静默丢数据强
+                    return 1
+                fi
             else
                 echo "  [warn] 便携包已有数据，跳过系统目录迁移: $link"
                 # 把系统目录改名备份而不是删除
@@ -161,7 +166,9 @@ ensure_symlink() {
                 return 0
             fi
         fi
-        rm -rf "$link" 2>/dev/null
+        # 走到这里：原目录空 或 cp 已成功。空目录可以安全 rmdir。
+        # 用 rmdir（只删空目录）替代 rm -rf，多一层保险。
+        rmdir "$link" 2>/dev/null || rm -rf "$link" 2>/dev/null
     fi
     ln -s "$target" "$link" 2>/dev/null
 }
@@ -209,12 +216,25 @@ trap cleanup EXIT INT TERM
 # ═══════════════════════════════════════════
 has_valid_config() {
     [ -f "$CCS_DB" ] || return 1
-    if ! command -v python3 &>/dev/null; then
-        # 无 python3 时退化到大小检查（不可靠）
-        local size
-        size=$(stat -f%z "$CCS_DB" 2>/dev/null || stat -c%s "$CCS_DB" 2>/dev/null || echo 0)
-        [ "$size" -gt 4096 ]
-        return $?
+    if command -v python3 &>/dev/null; then
+        : # 走 python3 路径
+    elif command -v sqlite3 &>/dev/null; then
+        # python3 不在 → 退化到 sqlite3 CLI（macOS 自带 /usr/bin/sqlite3）
+        local row
+        row=$(sqlite3 -readonly "$CCS_DB" \
+            "SELECT settings_config FROM providers WHERE app_type='claude' AND is_current=1 LIMIT 1;" 2>/dev/null)
+        if [ -n "$row" ] && \
+           printf '%s' "$row" | grep -q '"ANTHROPIC_BASE_URL"' && \
+           printf '%s' "$row" | grep -qE '"ANTHROPIC_(AUTH_TOKEN|API_KEY)"'; then
+            return 0
+        fi
+        return 1
+    else
+        # 既无 python3 也无 sqlite3。Size 检查不可靠：
+        # 空 SQLite DB 文件经常 > 4096 字节（schema + page header 占空间）。
+        # 此情况我们「返回未配置」（fail-closed），让 first-run 流程
+        # 启动 GUI，比误判已配置然后用空 token 启动 Claude 更安全。
+        return 1
     fi
     CCS_DB="$CCS_DB" python3 - <<'PYEOF' 2>/dev/null
 import sqlite3, json, os, sys

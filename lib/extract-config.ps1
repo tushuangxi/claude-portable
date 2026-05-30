@@ -79,17 +79,36 @@ try {
 # stderr. The launcher can decide whether to abort or proceed.
 try {
     # Streamed read in 64KB chunks (don't load full DB into memory).
+    # Carry up to 4 trailing bytes across iterations so multi-byte UTF-8
+    # sequences split across chunk boundaries decode correctly. Without
+    # this, GetString would emit U+FFFD on either side of every boundary,
+    # silently corrupting non-ASCII data near every 64KB mark.
     $fs = [IO.FileStream]::new($DbPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
     try {
         $sb = [Text.StringBuilder]::new()
         $buf = New-Object byte[] 65536
+        $byteTail = New-Object byte[] 0
+        $byteOverlap = 4
         while ($true) {
             $n = $fs.Read($buf, 0, $buf.Length)
             if ($n -le 0) { break }
-            [void]$sb.Append([Text.Encoding]::UTF8.GetString($buf, 0, $n))
+            $combined = New-Object byte[] ($byteTail.Length + $n)
+            [Array]::Copy($byteTail, 0, $combined, 0, $byteTail.Length)
+            [Array]::Copy($buf,      0, $combined, $byteTail.Length, $n)
+            $reserve = [Math]::Min($byteOverlap, $combined.Length)
+            $decodeLen = $combined.Length - $reserve
+            if ($decodeLen -gt 0) {
+                [void]$sb.Append([Text.Encoding]::UTF8.GetString($combined, 0, $decodeLen))
+            }
+            $byteTail = New-Object byte[] $reserve
+            [Array]::Copy($combined, $decodeLen, $byteTail, 0, $reserve)
             # Cap to 50MB even if file is bigger — beyond that the fallback
             # is not going to help.
             if ($sb.Length -gt 50000000) { break }
+        }
+        # Flush remaining byteTail (final chars at end of file)
+        if ($byteTail.Length -gt 0) {
+            [void]$sb.Append([Text.Encoding]::UTF8.GetString($byteTail))
         }
         $text = $sb.ToString()
     } finally {

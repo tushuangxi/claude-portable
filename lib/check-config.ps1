@@ -27,9 +27,13 @@ try {
 } catch {}
 
 # Fallback: streamed regex scan (don't load entire DB into memory).
-# Read the file in 64KB chunks, decode each chunk as UTF-8, and search
-# for the JSON keys. We keep a small overlap buffer between chunks to
-# handle keys that straddle chunk boundaries.
+# Read the file in 64KB chunks and search for the JSON keys.
+#
+# UTF-8 boundary handling: a multi-byte char split between chunks would
+# decode as U+FFFD (replacement char). We carry over the last few BYTES
+# of each chunk into the next decode operation so multi-byte sequences
+# stay intact. ASCII keys (ANTHROPIC_*) and ASCII URLs/tokens make this
+# mostly cosmetic in practice, but it's the correct behavior.
 #
 # Caveats acknowledged (vs SQLite query):
 #   - matches deleted-but-not-vacuumed rows (very unlikely to false-positive
@@ -40,9 +44,12 @@ try {
     $fs = [IO.FileStream]::new($DbPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
     try {
         $chunkSize = 65536
-        $overlap = 256  # large enough to span the longest expected JSON fragment
+        $textOverlap = 256       # decoded chars carried so regex matches across boundary
+        $byteOverlap = 4         # max UTF-8 sequence length
         $buffer = New-Object byte[] $chunkSize
-        $tail = ""  # carries the last `overlap` decoded chars across iterations
+        # carry: previously-decoded tail (string) + leftover undecoded bytes
+        $textTail = ""
+        $byteTail = New-Object byte[] 0
         $foundUrl = $false
         $foundKey = $false
         $urlPat = [regex]'"ANTHROPIC_BASE_URL"\s*:\s*"([^"]{6,})"'
@@ -52,17 +59,35 @@ try {
         while ($true) {
             $n = $fs.Read($buffer, 0, $chunkSize)
             if ($n -le 0) { break }
-            $chunkText = [Text.Encoding]::UTF8.GetString($buffer, 0, $n)
-            $window = $tail + $chunkText
+            # Concat byteTail + new chunk so split UTF-8 sequences merge cleanly.
+            $combined = New-Object byte[] ($byteTail.Length + $n)
+            [Array]::Copy($byteTail, 0, $combined, 0, $byteTail.Length)
+            [Array]::Copy($buffer,    0, $combined, $byteTail.Length, $n)
+
+            # Save up to byteOverlap trailing bytes for next iteration.
+            # If combined.Length <= byteOverlap, we're at end / starting case.
+            $reserveBytes = [Math]::Min($byteOverlap, $combined.Length)
+            $decodeLen = $combined.Length - $reserveBytes
+            $chunkText = if ($decodeLen -gt 0) { [Text.Encoding]::UTF8.GetString($combined, 0, $decodeLen) } else { "" }
+            $byteTail = New-Object byte[] $reserveBytes
+            [Array]::Copy($combined, $decodeLen, $byteTail, 0, $reserveBytes)
+
+            $window = $textTail + $chunkText
             if (-not $foundUrl -and $urlPat.IsMatch($window)) { $foundUrl = $true }
             if (-not $foundKey -and ($keyPat1.IsMatch($window) -or $keyPat2.IsMatch($window))) { $foundKey = $true }
             if ($foundUrl -and $foundKey) { exit 0 }
-            # Carry the tail to handle keys that straddle the chunk boundary
-            if ($window.Length -gt $overlap) {
-                $tail = $window.Substring($window.Length - $overlap)
+            if ($window.Length -gt $textOverlap) {
+                $textTail = $window.Substring($window.Length - $textOverlap)
             } else {
-                $tail = $window
+                $textTail = $window
             }
+        }
+        # Decode any final byteTail (last chars)
+        if ($byteTail.Length -gt 0) {
+            $window = $textTail + [Text.Encoding]::UTF8.GetString($byteTail)
+            if (-not $foundUrl -and $urlPat.IsMatch($window)) { $foundUrl = $true }
+            if (-not $foundKey -and ($keyPat1.IsMatch($window) -or $keyPat2.IsMatch($window))) { $foundKey = $true }
+            if ($foundUrl -and $foundKey) { exit 0 }
         }
     } finally {
         $fs.Close()

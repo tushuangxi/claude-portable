@@ -113,20 +113,8 @@ if [ "$LOCK_PRESENT" = "1" ] && [ -f "$LIB_DIR/binding.sh" ]; then
     fi
 fi
 
-# 一次性迁移：把系统已有的数据复制到便携包
-migrate_dir() {
-    local src="$1" dst="$2"
-    if [ -d "$src" ] && [ ! -L "$src" ]; then
-        if [ -n "$(ls -A "$src" 2>/dev/null)" ] && [ -z "$(ls -A "$dst" 2>/dev/null)" ]; then
-            echo "  [migrate] 复制系统现有数据到便携包: $src → $dst"
-            cp -a "$src/." "$dst/" 2>/dev/null
-        fi
-    fi
-}
-migrate_dir "$SYS_CCS" "$PORTABLE_CCS"
-migrate_dir "$SYS_CLAUDE" "$PORTABLE_CLAUDE"
-
-# 创建符号链接
+# 注：之前 migrate_dir 与 ensure_symlink 重复迁移；改为单路径，
+# ensure_symlink 自身完整处理迁移 + 链接。
 ensure_symlink() {
     local link="$1" target="$2"
     if [ -L "$link" ]; then
@@ -142,7 +130,19 @@ ensure_symlink() {
         if [ -n "$(ls -A "$link" 2>/dev/null)" ]; then
             if [ -z "$(ls -A "$target" 2>/dev/null)" ]; then
                 echo "  [migrate] $link → $target"
-                cp -a "$link/." "$target/" 2>/dev/null
+                # cp failure must NOT result in source removal.
+                # Previously: `cp -a ... 2>/dev/null` then rm -rf, which
+                # would silently destroy data on partial copy failure.
+                local cp_err
+                cp_err=$(mktemp -t claude-cp.XXXXXX 2>/dev/null) || cp_err="/tmp/claude-cp.$$"
+                if cp -a "$link/." "$target/" 2>"$cp_err"; then
+                    rm -f "$cp_err"
+                else
+                    echo "  [ERROR] migration failed; system dir kept intact: $link"
+                    [ -s "$cp_err" ] && sed 's/^/    /' "$cp_err" >&2
+                    rm -f "$cp_err"
+                    return 1
+                fi
             else
                 echo "  [warn] portable target not empty, skipping merge"
                 local backup="${link}.before-portable.$(date +%Y%m%d-%H%M%S)"
@@ -151,7 +151,8 @@ ensure_symlink() {
                 return 0
             fi
         fi
-        rm -rf "$link" 2>/dev/null
+        # Source dir is empty (or cp succeeded). Use rmdir for the safety net.
+        rmdir "$link" 2>/dev/null || rm -rf "$link" 2>/dev/null
     fi
     ln -s "$target" "$link" 2>/dev/null
 }
@@ -195,11 +196,26 @@ trap cleanup EXIT INT TERM
 # ═══════════════════════════════════════════
 has_valid_config() {
     [ -f "$CCS_DB" ] || return 1
-    if ! command -v python3 &>/dev/null; then
-        local size
-        size=$(stat -c%s "$CCS_DB" 2>/dev/null || stat -f%z "$CCS_DB" 2>/dev/null || echo 0)
-        [ "$size" -gt 4096 ]
-        return $?
+    if command -v python3 &>/dev/null; then
+        : # use python3 path below
+    elif command -v sqlite3 &>/dev/null; then
+        # No python3 → fall back to sqlite3 CLI
+        local row
+        row=$(sqlite3 -readonly "$CCS_DB" \
+            "SELECT settings_config FROM providers WHERE app_type='claude' AND is_current=1 LIMIT 1;" 2>/dev/null)
+        if [ -n "$row" ] && \
+           printf '%s' "$row" | grep -q '"ANTHROPIC_BASE_URL"' && \
+           printf '%s' "$row" | grep -qE '"ANTHROPIC_(AUTH_TOKEN|API_KEY)"'; then
+            return 0
+        fi
+        return 1
+    else
+        # Neither python3 nor sqlite3. Size check is unreliable —
+        # an empty SQLite DB is often >4KB (schema + page header).
+        # Fail closed: report "not configured" so first-run UI runs,
+        # vs. the previous behavior of false-positive "configured" and
+        # launching Claude with empty creds.
+        return 1
     fi
     CCS_DB="$CCS_DB" python3 - <<'PYEOF' 2>/dev/null
 import sqlite3, json, os, sys

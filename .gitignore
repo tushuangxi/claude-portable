@@ -17,6 +17,9 @@ data/.claude/
 # Drive binding lock (per-USB, never commit)
 data/.lock
 
+# Single-instance run lock (per-process, never commit)
+data/.running
+
 # Temp
 *.tmp
 *.swp
