@@ -94,12 +94,22 @@ if exist "%LOCK_FILE2%" set "LOCK_PRESENT=1"
 if "!LOCK_PRESENT!"=="0" goto :binding_done
 if not exist "%LIB_DIR%\binding.ps1" goto :binding_done
 
-set "ACTIVE_LOCK=%LOCK_FILE%"
-if not exist "%LOCK_FILE%" set "ACTIVE_LOCK=%LOCK_FILE2%"
-powershell -NoProfile -ExecutionPolicy Bypass -File "%LIB_DIR%\binding.ps1" check "%SCRIPT_DIR_PS%" "!ACTIVE_LOCK!" >nul 2>&1
-set "BIND_RESULT=!errorlevel!"
-if "!BIND_RESULT!"=="1" goto :binding_failed
-if "!BIND_RESULT!"=="3" echo   [warn] Could not verify drive binding (continuing).
+REM Validate every existing lock. Both lock files should hold the same
+REM hash; any mismatch immediately denies launch. This is what makes
+REM the dual-lock design actually prevent bypass — replacing one lock
+REM with random bytes still gets caught when the other is checked.
+set "BIND_FAILED=0"
+set "BIND_WARNED=0"
+for %%L in ("%LOCK_FILE%" "%LOCK_FILE2%") do (
+  if exist "%%~L" (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%LIB_DIR%\binding.ps1" check "%SCRIPT_DIR_PS%" "%%~L" >nul 2>&1
+    set "EC=!errorlevel!"
+    if "!EC!"=="1" set "BIND_FAILED=1"
+    if "!EC!"=="3" set "BIND_WARNED=1"
+  )
+)
+if "!BIND_FAILED!"=="1" goto :binding_failed
+if "!BIND_WARNED!"=="1" echo   [warn] Could not verify drive binding (continuing).
 goto :binding_done
 
 :binding_failed

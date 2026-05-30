@@ -91,11 +91,22 @@ LOCK_PRESENT=0
 
 if [ "$LOCK_PRESENT" = "1" ] && [ -f "$LIB_DIR/binding.sh" ]; then
     chmod +x "$LIB_DIR/binding.sh" 2>/dev/null
-    ACTIVE_LOCK="$LOCK_FILE"
-    [ ! -f "$LOCK_FILE" ] && ACTIVE_LOCK="$LOCK_FILE2"
-    bash "$LIB_DIR/binding.sh" check "$SCRIPT_DIR" "$ACTIVE_LOCK"
-    bind_result=$?
-    if [ $bind_result -eq 1 ]; then
+    # Validate every existing lock. Both files should have the same hash;
+    # any mismatch immediately denies launch. This makes the dual-lock
+    # design actually pay off: replacing one file with random data still
+    # gets caught when the other is checked.
+    bind_failed=0
+    bind_warned=0
+    for active_lock in "$LOCK_FILE" "$LOCK_FILE2"; do
+        [ -f "$active_lock" ] || continue
+        bash "$LIB_DIR/binding.sh" check "$SCRIPT_DIR" "$active_lock"
+        r=$?
+        case $r in
+            1) bind_failed=1; break ;;
+            3) bind_warned=1 ;;
+        esac
+    done
+    if [ "$bind_failed" = "1" ]; then
         echo ""
         echo "  ============================================================"
         echo "  [ERROR] 此便携包已绑定到原始设备。"
@@ -108,8 +119,8 @@ if [ "$LOCK_PRESENT" = "1" ] && [ -f "$LIB_DIR/binding.sh" ]; then
         echo ""
         exit 1
     fi
-    if [ $bind_result -eq 3 ]; then
-        echo "  [warn] 无法验证设备绑定（继续运行）。"
+    if [ "$bind_warned" = "1" ]; then
+        echo "  [warn] Could not verify drive binding (continuing)."
     fi
 fi
 
@@ -151,8 +162,9 @@ ensure_symlink() {
                 return 0
             fi
         fi
-        # Source dir is empty (or cp succeeded). Use rmdir for the safety net.
-        rmdir "$link" 2>/dev/null || rm -rf "$link" 2>/dev/null
+        # Source dir is empty (or cp succeeded). Remove it so we can
+        # replace with a symlink.
+        rm -rf "$link" 2>/dev/null
     fi
     ln -s "$target" "$link" 2>/dev/null
 }

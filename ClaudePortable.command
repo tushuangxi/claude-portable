@@ -96,11 +96,23 @@ LOCK_PRESENT=0
 
 if [ "$LOCK_PRESENT" = "1" ] && [ -f "$LIB_DIR/binding.sh" ]; then
     chmod +x "$LIB_DIR/binding.sh" 2>/dev/null
-    ACTIVE_LOCK="$LOCK_FILE"
-    [ ! -f "$LOCK_FILE" ] && ACTIVE_LOCK="$LOCK_FILE2"
-    bash "$LIB_DIR/binding.sh" check "$SCRIPT_DIR" "$ACTIVE_LOCK"
-    bind_result=$?
-    if [ $bind_result -eq 1 ]; then
+    # 校验任一存在的 lock。两个文件内容应一致——若不一致说明
+    # 有人篡改了其中一个，按最严格的策略对待：用任一现存 lock
+    # 检查；若其中一个 hash mismatch 但另一个 match，仍然 deny。
+    # （但其实若 hash mismatch，说明此设备非原设备，两个 lock
+    # 都会 mismatch，不存在「一对一错」的情况——除非用户故意改）
+    bind_failed=0
+    bind_warned=0
+    for active_lock in "$LOCK_FILE" "$LOCK_FILE2"; do
+        [ -f "$active_lock" ] || continue
+        bash "$LIB_DIR/binding.sh" check "$SCRIPT_DIR" "$active_lock"
+        r=$?
+        case $r in
+            1) bind_failed=1; break ;;   # mismatch → 立即拒绝
+            3) bind_warned=1 ;;           # 无法计算 fingerprint
+        esac
+    done
+    if [ "$bind_failed" = "1" ]; then
         echo ""
         echo "  ============================================================"
         echo "  [ERROR] 此便携包已绑定到原始设备。"
@@ -114,7 +126,7 @@ if [ "$LOCK_PRESENT" = "1" ] && [ -f "$LIB_DIR/binding.sh" ]; then
         echo ""
         exit 1
     fi
-    if [ $bind_result -eq 3 ]; then
+    if [ "$bind_warned" = "1" ]; then
         echo "  [warn] 无法验证设备绑定（继续运行）。"
     fi
 fi
@@ -166,9 +178,9 @@ ensure_symlink() {
                 return 0
             fi
         fi
-        # 走到这里：原目录空 或 cp 已成功。空目录可以安全 rmdir。
-        # 用 rmdir（只删空目录）替代 rm -rf，多一层保险。
-        rmdir "$link" 2>/dev/null || rm -rf "$link" 2>/dev/null
+        # 走到这里：cp 已成功（或源目录原本就是空的）。
+        # 删除源目录腾出位置创建符号链接。
+        rm -rf "$link" 2>/dev/null
     fi
     ln -s "$target" "$link" 2>/dev/null
 }
