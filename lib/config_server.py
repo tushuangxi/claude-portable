@@ -133,13 +133,15 @@ def list_providers():
         return out
     try:
         db = _connect()
-        rows = db.execute(
-            "SELECT id, name, is_current FROM providers WHERE app_type=? "
-            "ORDER BY is_current DESC, name", (APP_TYPE,)
-        ).fetchall()
-        db.close()
-        for r in rows:
-            out.append({"id": r[0], "name": r[1], "active": bool(r[2])})
+        try:
+            rows = db.execute(
+                "SELECT id, name, is_current FROM providers WHERE app_type=? "
+                "ORDER BY is_current DESC, name", (APP_TYPE,)
+            ).fetchall()
+            for r in rows:
+                out.append({"id": r[0], "name": r[1], "active": bool(r[2])})
+        finally:
+            db.close()
     except Exception:
         pass
     return out
@@ -160,9 +162,6 @@ def save_provider(name, base_url, api_key, model):
     }
     if model:
         env["ANTHROPIC_MODEL"] = model
-        # Map all tiers to the chosen model for third-party single-model
-        # providers; harmless for official (the names just won't resolve
-        # to anything unusual since Claude picks per-request).
         env["ANTHROPIC_DEFAULT_SONNET_MODEL"] = model
         env["ANTHROPIC_DEFAULT_OPUS_MODEL"] = model
         env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = model
@@ -170,30 +169,33 @@ def save_provider(name, base_url, api_key, model):
     meta = {"apiFormat": "anthropic"}
 
     db = _connect()
-    _ensure_schema(db)
-    pid = str(uuid.uuid4())
-    # Demote any existing current provider for this app_type
-    db.execute("UPDATE providers SET is_current=0 WHERE app_type=?", (APP_TYPE,))
-    db.execute(
-        "INSERT INTO providers (id, app_type, name, settings_config, "
-        "created_at, sort_index, meta, is_current) "
-        "VALUES (?,?,?,?,?,?,?,1)",
-        (pid, APP_TYPE, name or "Custom",
-         json.dumps(settings, ensure_ascii=False),
-         int(time.time() * 1000), 0, json.dumps(meta)),
-    )
-    db.commit()
-    db.close()
+    try:
+        _ensure_schema(db)
+        pid = str(uuid.uuid4())
+        db.execute("UPDATE providers SET is_current=0 WHERE app_type=?", (APP_TYPE,))
+        db.execute(
+            "INSERT INTO providers (id, app_type, name, settings_config, "
+            "created_at, sort_index, meta, is_current) "
+            "VALUES (?,?,?,?,?,?,?,1)",
+            (pid, APP_TYPE, name or "Custom",
+             json.dumps(settings, ensure_ascii=False),
+             int(time.time() * 1000), 0, json.dumps(meta)),
+        )
+        db.commit()
+    finally:
+        db.close()
     return pid
 
 
 def activate_provider(pid):
     db = _connect()
-    db.execute("UPDATE providers SET is_current=0 WHERE app_type=?", (APP_TYPE,))
-    db.execute("UPDATE providers SET is_current=1 WHERE id=? AND app_type=?",
-               (pid, APP_TYPE))
-    db.commit()
-    db.close()
+    try:
+        db.execute("UPDATE providers SET is_current=0 WHERE app_type=?", (APP_TYPE,))
+        db.execute("UPDATE providers SET is_current=1 WHERE id=? AND app_type=?",
+                   (pid, APP_TYPE))
+        db.commit()
+    finally:
+        db.close()
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -235,32 +237,34 @@ def import_config(blob):
     if not isinstance(blob, dict) or not isinstance(blob.get("providers"), list):
         raise ValueError("无效的配置文件格式")
     db = _connect()
-    _ensure_schema(db)
-    count = 0
-    current_id = None
-    for p in blob["providers"]:
-        pid = p.get("id") or str(uuid.uuid4())
-        name = p.get("name") or "Imported"
-        settings = p.get("settings_config") or {}
-        meta = p.get("meta") or {}
-        if not settings.get("env"):
-            continue
-        db.execute(
-            "INSERT OR REPLACE INTO providers (id, app_type, name, "
-            "settings_config, created_at, sort_index, meta, is_current) "
-            "VALUES (?,?,?,?,?,?,?,0)",
-            (pid, APP_TYPE, name, json.dumps(settings, ensure_ascii=False),
-             int(time.time() * 1000), 0, json.dumps(meta)),
-        )
-        count += 1
-        if p.get("is_current"):
-            current_id = pid
-    if current_id:
-        db.execute("UPDATE providers SET is_current=0 WHERE app_type=?", (APP_TYPE,))
-        db.execute("UPDATE providers SET is_current=1 WHERE id=? AND app_type=?",
-                   (current_id, APP_TYPE))
-    db.commit()
-    db.close()
+    try:
+        _ensure_schema(db)
+        count = 0
+        current_id = None
+        for p in blob["providers"]:
+            pid = p.get("id") or str(uuid.uuid4())
+            name = p.get("name") or "Imported"
+            settings = p.get("settings_config") or {}
+            meta = p.get("meta") or {}
+            if not settings.get("env"):
+                continue
+            db.execute(
+                "INSERT OR REPLACE INTO providers (id, app_type, name, "
+                "settings_config, created_at, sort_index, meta, is_current) "
+                "VALUES (?,?,?,?,?,?,?,0)",
+                (pid, APP_TYPE, name, json.dumps(settings, ensure_ascii=False),
+                 int(time.time() * 1000), 0, json.dumps(meta)),
+            )
+            count += 1
+            if p.get("is_current"):
+                current_id = pid
+        if current_id:
+            db.execute("UPDATE providers SET is_current=0 WHERE app_type=?", (APP_TYPE,))
+            db.execute("UPDATE providers SET is_current=1 WHERE id=? AND app_type=?",
+                       (current_id, APP_TYPE))
+        db.commit()
+    finally:
+        db.close()
     return count
 
 
@@ -285,13 +289,26 @@ def view_config():
 def read_logs(max_lines=200):
     """Tail the most recent Claude session log. claude writes session
     history under data/.claude/. We surface the newest *.log / *.jsonl
-    tail so users can debug a failed launch without leaving the panel."""
+    tail so users can debug a failed launch without leaving the panel.
+
+    Safety: do NOT follow symlinks. During an active launcher session,
+    data/.claude may be a symlink to the system ~/.claude — traversing
+    that would be slow, potentially huge, and a privacy leak (showing
+    the user's real system claude logs in the portable panel)."""
     claude_dir = DATA_DIR / ".claude"
     if not claude_dir.exists():
         return {"available": False, "text": "暂无日志（data/.claude/ 不存在）"}
+    # If data/.claude is a symlink (active session), refuse to traverse
+    # the target — it's the system dir, not ours.
+    if claude_dir.is_symlink():
+        return {"available": False,
+                "text": "data/.claude 是符号链接（活跃会话中），日志在终端查看更安全"}
     candidates = []
     try:
         for p in claude_dir.rglob("*"):
+            # Skip symlinks inside the dir too (defense in depth)
+            if p.is_symlink():
+                continue
             if p.is_file() and p.suffix in (".log", ".jsonl", ".txt"):
                 try:
                     candidates.append((p.stat().st_mtime, p))

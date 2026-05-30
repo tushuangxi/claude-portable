@@ -352,7 +352,7 @@ if ! has_valid_config; then
         # cc-switch 进程已经退出？用户关掉了，或者 GUI 崩了。
         if ! kill -0 "$CC_SWITCH_PID" 2>/dev/null; then
             echo ""
-            echo "  [!] CC Switch 已退出但仍未检测到 Provider 配置。"
+            echo "  [!] 配置工具已退出但仍未检测到 Provider 配置。"
             echo "  请重新运行并完成配置。"
             exit 1
         fi
