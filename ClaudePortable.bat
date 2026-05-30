@@ -224,7 +224,11 @@ if exist "%LIB_DIR%\extract-config.ps1" (
       if exist "!TMP_URL!" (
         set /p ANTHROPIC_BASE_URL=<"!TMP_URL!"
         set /p ANTHROPIC_AUTH_TOKEN=<"!TMP_KEY!"
-        del "!TMP_URL!" "!TMP_KEY!" >nul 2>&1
+        REM Always delete temp files, even if set /p failed.
+        REM These contain the API key; leaving them in %TEMP% is a
+        REM credential leak that Windows may not clean up for weeks.
+        del /f /q "!TMP_URL!" >nul 2>&1
+        del /f /q "!TMP_KEY!" >nul 2>&1
         echo   [ok] Config loaded
       ) else (
         timeout /t 2 >nul 2>&1
@@ -232,6 +236,10 @@ if exist "%LIB_DIR%\extract-config.ps1" (
     )
   )
 )
+REM Defense in depth: clean up any stale temp files left from a
+REM crashed previous run (best-effort match by prefix).
+if exist "!TMP_URL!" del /f /q "!TMP_URL!" >nul 2>&1
+if exist "!TMP_KEY!" del /f /q "!TMP_KEY!" >nul 2>&1
 
 if "!ANTHROPIC_AUTH_TOKEN!"=="" (
   echo   [!] Failed to load config.

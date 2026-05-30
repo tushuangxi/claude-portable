@@ -25,8 +25,18 @@ try {
         $url = $e.ANTHROPIC_BASE_URL
         $key = if ($e.ANTHROPIC_AUTH_TOKEN) { $e.ANTHROPIC_AUTH_TOKEN } else { $e.ANTHROPIC_API_KEY }
         if ($url -and $key) {
-            [IO.File]::WriteAllText($OutUrl, $url)
-            [IO.File]::WriteAllText($OutKey, $key)
+            # Trim defensive: cc-switch may store keys with trailing
+            # whitespace if user pasted with extra characters. set /p
+            # in cmd preserves trailing whitespace, which would break
+            # API calls (404 on URL, auth failure on key).
+            $url = $url.Trim()
+            $key = $key.Trim()
+            if (-not $url -or -not $key) { exit 1 }
+            # set /p in Windows cmd reads until newline. Write a trailing
+            # newline so older cmd versions don't return empty (some cmd
+            # implementations require LF-terminated input for set /p).
+            [IO.File]::WriteAllText($OutUrl, $url + "`n")
+            [IO.File]::WriteAllText($OutKey, $key + "`n")
             exit 0
         }
     }
@@ -46,8 +56,11 @@ try {
             $url = $e.ANTHROPIC_BASE_URL
             $key = if ($e.ANTHROPIC_AUTH_TOKEN) { $e.ANTHROPIC_AUTH_TOKEN } else { $e.ANTHROPIC_API_KEY }
             if ($url -and $key) {
-                [IO.File]::WriteAllText($OutUrl, $url)
-                [IO.File]::WriteAllText($OutKey, $key)
+                $url = $url.Trim()
+                $key = $key.Trim()
+                if (-not $url -or -not $key) { exit 1 }
+                [IO.File]::WriteAllText($OutUrl, $url + "`n")
+                [IO.File]::WriteAllText($OutKey, $key + "`n")
                 exit 0
             }
         }
@@ -95,10 +108,11 @@ try {
             # The CMD wrapper hides stderr so this is mostly for diagnostics.
             [Console]::Error.WriteLine("[warn] Multiple providers detected; selecting the last-stored one. Install Python or sqlite3.exe for accurate selection.")
         }
-        $url = $urlMatches[$urlMatches.Count - 1].Groups[1].Value
-        $key = $keyMatches[$keyMatches.Count - 1].Groups[1].Value
-        [IO.File]::WriteAllText($OutUrl, $url)
-        [IO.File]::WriteAllText($OutKey, $key)
+        $url = $urlMatches[$urlMatches.Count - 1].Groups[1].Value.Trim()
+        $key = $keyMatches[$keyMatches.Count - 1].Groups[1].Value.Trim()
+        if (-not $url -or -not $key) { exit 1 }
+        [IO.File]::WriteAllText($OutUrl, $url + "`n")
+        [IO.File]::WriteAllText($OutKey, $key + "`n")
         exit 0
     }
 } catch {}

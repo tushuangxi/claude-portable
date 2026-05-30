@@ -164,6 +164,12 @@ WE_STARTED_CCS=0
 # 退出时清理符号链接
 cleanup() {
     if [ "$WE_STARTED_CCS" = "1" ] && [ -n "$CC_SWITCH_PID" ] && kill -0 "$CC_SWITCH_PID" 2>/dev/null; then
+        # 重要：先收集子进程列表再 kill 父进程。
+        # 父进程被 kill 后，子进程会 reparent 到 init (PID 1)，
+        # `pgrep -P parent_pid` 就找不到它们了。
+        local children
+        children=$(pgrep -P "$CC_SWITCH_PID" 2>/dev/null || true)
+
         kill -TERM "$CC_SWITCH_PID" 2>/dev/null
         for _ in 1 2 3 4 5; do
             kill -0 "$CC_SWITCH_PID" 2>/dev/null || break
@@ -172,8 +178,8 @@ cleanup() {
         if kill -0 "$CC_SWITCH_PID" 2>/dev/null; then
             kill -9 "$CC_SWITCH_PID" 2>/dev/null
         fi
-        # 仅清理本进程的直接子进程
-        for child in $(pgrep -P "$CC_SWITCH_PID" 2>/dev/null); do
+        # 清理之前收集的子进程（避免父进程死后变孤儿丢失）
+        for child in $children; do
             kill -9 "$child" 2>/dev/null
         done
     fi
@@ -279,6 +285,9 @@ try:
         env = cfg.get('env', {})
         bu = env.get('ANTHROPIC_BASE_URL', '')
         ak = env.get('ANTHROPIC_AUTH_TOKEN', '') or env.get('ANTHROPIC_API_KEY', '')
+        # Trim whitespace defensively (see .command for rationale).
+        if isinstance(bu, str): bu = bu.strip()
+        if isinstance(ak, str): ak = ak.strip()
         if bu and ak:
             print(bu)
             print(ak)
@@ -327,3 +336,12 @@ echo "  架构: $ARCH | 数据: 便携包内"
 echo ""
 
 "$BIN_DIR/claude" "$@"
+CLAUDE_EXIT=$?
+
+# 提前清理：不依赖 trap。即便用户在终端关闭前拔 U 盘，
+# 主目录也已干净，不会留下指向不可达 USB 路径的 broken symlink。
+[ -L "$SYS_CCS" ] && rm "$SYS_CCS" 2>/dev/null
+[ -L "$SYS_CLAUDE" ] && rm "$SYS_CLAUDE" 2>/dev/null
+[ -f "$RUN_LOCK" ] && rm -f "$RUN_LOCK"
+
+exit $CLAUDE_EXIT

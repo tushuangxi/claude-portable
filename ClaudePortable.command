@@ -175,6 +175,12 @@ WE_STARTED_CCS=0
 cleanup() {
     # 优雅杀掉本脚本启动的 cc-switch
     if [ "$WE_STARTED_CCS" = "1" ] && [ -n "$CC_SWITCH_PID" ] && kill -0 "$CC_SWITCH_PID" 2>/dev/null; then
+        # 重要：先收集子进程列表再 kill 父进程。
+        # 父进程被 kill 后，子进程会 reparent 到 init (PID 1)，
+        # `pgrep -P parent_pid` 就找不到它们了。
+        local children
+        children=$(pgrep -P "$CC_SWITCH_PID" 2>/dev/null || true)
+
         # 先 SIGTERM 主进程
         kill -TERM "$CC_SWITCH_PID" 2>/dev/null
         # 等最多 5 秒让 Electron 优雅关闭
@@ -186,9 +192,8 @@ cleanup() {
         if kill -0 "$CC_SWITCH_PID" 2>/dev/null; then
             kill -9 "$CC_SWITCH_PID" 2>/dev/null
         fi
-        # 清理可能残留的 Electron 子进程（仅本进程的子代）
-        # 用 pgrep -P 找直接子进程
-        for child in $(pgrep -P "$CC_SWITCH_PID" 2>/dev/null); do
+        # 清理之前收集的子进程（包括优雅关闭时漏掉的）
+        for child in $children; do
             kill -9 "$child" 2>/dev/null
         done
     fi
@@ -297,6 +302,11 @@ try:
         env = cfg.get('env', {})
         bu = env.get('ANTHROPIC_BASE_URL', '')
         ak = env.get('ANTHROPIC_AUTH_TOKEN', '') or env.get('ANTHROPIC_API_KEY', '')
+        # Trim whitespace — cc-switch may store keys with trailing whitespace
+        # if user pasted with extra characters. Without this, claude API
+        # calls would 404/401 on the malformed credential.
+        if isinstance(bu, str): bu = bu.strip()
+        if isinstance(ak, str): ak = ak.strip()
         if bu and ak:
             print(bu)
             print(ak)
