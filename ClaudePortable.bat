@@ -9,7 +9,7 @@ set "ANTHROPIC_AUTH_TOKEN="
 set "ANTHROPIC_BASE_URL="
 
 echo.
-echo      Claude Code Portable
+echo      YLYG - Claude Code Portable
 echo.
 
 set "SCRIPT_DIR=%~dp0"
@@ -261,7 +261,15 @@ if defined PY_CMD (
     start "" "%BIN_DIR%\cc-switch.exe"
     set "WE_STARTED_CCS=1"
 ) else (
-    echo   [!] No python3 and no cc-switch.exe found. Cannot configure.
+    echo.
+    echo   [!] Cannot auto-configure. Neither python3 nor cc-switch.exe found.
+    echo.
+    echo   Fix options:
+    echo     1. Install Python from python.org and re-run
+    echo     2. Or manually create: data\.cc-switch\cc-switch.db
+    echo        using CC Switch GUI from another machine
+    echo     3. Or ask someone to export a config JSON and place it here
+    echo.
     goto :error_cleanup
 )
 
