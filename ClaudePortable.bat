@@ -102,7 +102,7 @@ if exist "%RUN_LOCK%" (
   if defined PREV_PID (
     tasklist /fi "PID eq !PREV_PID!" 2>nul | find "!PREV_PID!" >nul
     if !errorlevel! EQU 0 (
-      echo   [info] Another instance is already running (PID !PREV_PID!).
+      echo   [info] Another instance is already running ^(PID !PREV_PID!^).
       timeout /t 5 >nul 2>&1
       exit /b 1
     )
@@ -112,7 +112,7 @@ if exist "%RUN_LOCK%" (
 
 mkdir "%RUN_LOCK%" 2>nul
 if !errorlevel! NEQ 0 (
-  echo   [info] Another instance is already running (concurrent start).
+  echo   [info] Another instance is already running ^(concurrent start^).
   timeout /t 5 >nul 2>&1
   exit /b 1
 )
@@ -141,7 +141,7 @@ for %%L in ("%LOCK_FILE%" "%LOCK_FILE2%") do (
   )
 )
 if "!BIND_FAILED!"=="1" goto :binding_failed
-if "!BIND_WARNED!"=="1" echo   [warn] Could not verify drive binding (continuing).
+if "!BIND_WARNED!"=="1" echo   [warn] Could not verify drive binding ^(continuing^).
 goto :binding_done
 
 :binding_failed
