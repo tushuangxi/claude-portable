@@ -128,51 +128,36 @@ jobs:
       - name: Download CC Switch
         run: |
           set -euo pipefail
-          echo "Downloading CC Switch from GitHub releases..."
-          BASE="https://github.com/farion1231/cc-switch/releases/latest/download"
+          echo "Downloading CC Switch from our auxiliary release..."
+          BASE="https://github.com/yuluyangguang1/codex-portable/releases/download/cc-switch-assets"
 
-          # Get latest version (with fallback)
-          CCS_VER=""
-          CCS_VER=$(curl -fsSL https://api.github.com/repos/farion1231/cc-switch/releases/latest 2>/dev/null | grep -o '"tag_name":"[^"]*"' | cut -d'"' -f4 | sed 's/^v//') || true
-          [ -z "$CCS_VER" ] && CCS_VER="3.15.0"
-
-          # macOS (universal dmg -> extract app)
+          # macOS (universal binary, same file for arm64 and x64)
           echo "  macOS..."
-          curl -fsSL -o /tmp/ccswitch-mac.tar.gz "$BASE/CC-Switch-v${CCS_VER}-macOS.tar.gz" 2>/dev/null || true
-          if [ -f /tmp/ccswitch-mac.tar.gz ] && [ -s /tmp/ccswitch-mac.tar.gz ]; then
-            mkdir -p /tmp/ccswitch-mac
-            tar -xzf /tmp/ccswitch-mac.tar.gz -C /tmp/ccswitch-mac 2>/dev/null || true
-            # Find the binary inside the .app bundle
-            CCS_BIN=$(find /tmp/ccswitch-mac \( -name "CC-Switch" -o -name "cc-switch" \) -type f 2>/dev/null | head -1)
-            if [ -n "$CCS_BIN" ] && [ -f "$CCS_BIN" ]; then
-              cp "$CCS_BIN" bin/macos-arm64/cc-switch
-              cp "$CCS_BIN" bin/macos-x64/cc-switch
-              chmod +x bin/macos-arm64/cc-switch bin/macos-x64/cc-switch
-              echo "    OK: macOS cc-switch"
-            fi
+          curl -fsSL --retry 3 -o bin/macos-arm64/cc-switch "${BASE}/cc-switch-macos" || true
+          if [ -f bin/macos-arm64/cc-switch ] && [ -s bin/macos-arm64/cc-switch ]; then
+            cp bin/macos-arm64/cc-switch bin/macos-x64/cc-switch
+            chmod +x bin/macos-arm64/cc-switch bin/macos-x64/cc-switch
+            echo "    OK: macOS cc-switch"
           fi
 
-          # Linux x64 (AppImage)
+          # Linux x64
           echo "  Linux..."
-          curl -fsSL -o bin/linux-x64/cc-switch "$BASE/CC-Switch-v${CCS_VER}-Linux-x86_64.AppImage" 2>/dev/null || true
+          curl -fsSL --retry 3 -o bin/linux-x64/cc-switch "${BASE}/cc-switch-linux-x64" || true
           if [ -f bin/linux-x64/cc-switch ] && [ -s bin/linux-x64/cc-switch ]; then
             chmod +x bin/linux-x64/cc-switch
-            echo "    OK: Linux cc-switch (AppImage)"
+            echo "    OK: Linux cc-switch"
           else
             rm -f bin/linux-x64/cc-switch
           fi
 
-          # Windows (portable zip)
+          # Windows x64
           echo "  Windows..."
-          curl -fsSL -o /tmp/ccswitch-win.zip "$BASE/CC-Switch-v${CCS_VER}-Windows-Portable.zip" 2>/dev/null || true
-          if [ -f /tmp/ccswitch-win.zip ] && [ -s /tmp/ccswitch-win.zip ]; then
-            mkdir -p /tmp/ccswitch-win
-            unzip -qo /tmp/ccswitch-win.zip -d /tmp/ccswitch-win 2>/dev/null || true
-            CCS_EXE=$(find /tmp/ccswitch-win \( -name "CC-Switch.exe" -o -name "cc-switch.exe" \) -type f 2>/dev/null | head -1)
-            if [ -n "$CCS_EXE" ] && [ -f "$CCS_EXE" ]; then
-              cp "$CCS_EXE" bin/windows-x64/cc-switch.exe
-              echo "    OK: Windows cc-switch.exe"
-            fi
+          curl -fsSL --retry 3 -o bin/windows-x64/cc-switch.exe "${BASE}/cc-switch-windows-x64.exe" || true
+          if [ -f bin/windows-x64/cc-switch.exe ] && [ -s bin/windows-x64/cc-switch.exe ]; then
+            echo "    OK: Windows cc-switch.exe"
+          else
+            rm -f bin/windows-x64/cc-switch.exe
+            echo "    WARN: Windows cc-switch.exe download failed"
           fi
 
           echo "CC Switch download complete."
