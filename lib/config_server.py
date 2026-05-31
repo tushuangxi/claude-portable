@@ -55,41 +55,121 @@ SERVER_TOKEN = secrets.token_hex(32)
 # Each provider maps to an Anthropic-compatible base_url. Claude Code
 # talks the Anthropic wire protocol, so third-party providers must
 # expose an /anthropic-compatible endpoint (most aggregators do).
-# Models updated 2026-05-31.
+# Models updated 2026-05-31 (researched from official docs).
 PROVIDERS = [
+    # ── Anthropic 官方 ──────────────────────────────────────────────
+    # claude-opus-4-8: released 2026-05-28, 1M context, dynamic workflows
+    # claude-opus-4-7: hybrid reasoning, strongest agentic coding
+    # claude-sonnet-4-6: best speed/intelligence balance
+    # claude-haiku-4-5: fastest, near-frontier
     {"id": "anthropic", "name": "Anthropic 官方", "base_url": "https://api.anthropic.com",
      "models": ["claude-opus-4-8", "claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5"],
-     "key_hint": "sk-ant-...", "note": "官方直连，最新 Opus 4.8 (1M context)"},
+     "key_hint": "sk-ant-...", "note": "官方直连，Opus 4.8 最新 (1M context, 动态工作流)"},
+
+    # ── OpenRouter 聚合 ─────────────────────────────────────────────
+    # 一个 Key 访问所有主流模型；模型 ID 格式 provider/model-name
     {"id": "openrouter", "name": "OpenRouter", "base_url": "https://openrouter.ai/api",
-     "models": ["anthropic/claude-opus-4.8", "anthropic/claude-opus-4.7",
-                "anthropic/claude-sonnet-4.6", "anthropic/claude-haiku-4.5",
-                "google/gemini-3.1-pro-preview", "openai/gpt-5.5",
-                "deepseek/deepseek-v4-pro", "x-ai/grok-4.3"],
-     "key_hint": "sk-or-...", "note": "聚合平台，一个 Key 用所有模型"},
-    {"id": "minimax", "name": "MiniMax (海螺)", "base_url": "https://api.minimaxi.com/anthropic",
-     "models": ["MiniMax-M2.7", "MiniMax-M2.7-highspeed", "MiniMax-M2.5"],
-     "key_hint": "粘贴 MiniMax API Key", "note": "国产，Anthropic 兼容，速度快"},
+     "models": [
+         "anthropic/claude-opus-4-8",
+         "anthropic/claude-opus-4-7",
+         "anthropic/claude-sonnet-4-6",
+         "google/gemini-3.1-pro-preview",
+         "google/gemini-3.5-flash",
+         "x-ai/grok-4",
+         "deepseek/deepseek-v4-pro",
+         "minimax/minimax-m2.7",
+         "moonshotai/kimi-k2.6",
+         "qwen/qwen3.6-plus",
+     ],
+     "key_hint": "sk-or-...", "note": "聚合平台，一个 Key 用所有模型，含 Gemini/Grok/Kimi"},
+
+    # ── DeepSeek ────────────────────────────────────────────────────
+    # V4-Pro: 1.6T MoE, 1M context, Anthropic 兼容端点
+    # V4-Flash: 284B MoE, 1M context, 低延迟
+    # deepseek-chat/reasoner: 2026-07-24 废弃，保留作兼容过渡
     {"id": "deepseek", "name": "DeepSeek", "base_url": "https://api.deepseek.com/anthropic",
      "models": ["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-chat", "deepseek-reasoner"],
-     "key_hint": "sk-...", "note": "国产，性价比极高，V4 系列最新"},
+     "key_hint": "sk-...", "note": "国产，V4-Pro 1M context，性价比极高，Anthropic 兼容"},
+
+    # ── MiniMax ─────────────────────────────────────────────────────
+    # M2.7: 最新，自我进化，Office 套件强
+    # M2.5: SWE-Bench 80.2%，编码旗舰
+    # M2: 轻量高效，10B active / 230B total
+    {"id": "minimax", "name": "MiniMax (海螺)", "base_url": "https://api.minimaxi.com/anthropic",
+     "models": ["MiniMax-M2.7", "MiniMax-M2.7-highspeed", "MiniMax-M2.5", "MiniMax-M2"],
+     "key_hint": "粘贴 MiniMax API Key", "note": "国产，M2.7 最新，Anthropic 兼容，速度快"},
+
+    # ── 智谱 GLM ────────────────────────────────────────────────────
+    # GLM-5.1: 744B MoE，SWE-Bench Pro SOTA，8h 持续执行
+    # GLM-5: 上一代旗舰
     {"id": "zhipu", "name": "智谱 GLM", "base_url": "https://open.bigmodel.cn/api/anthropic",
      "models": ["glm-5.1", "glm-5", "glm-4.6", "glm-4.5-air", "glm-4.5-flash"],
-     "key_hint": "粘贴智谱 API Key", "note": "国产，GLM-5 系列最新"},
+     "key_hint": "粘贴智谱 API Key", "note": "国产，GLM-5.1 最新，744B MoE，编码 SOTA"},
+
+    # ── Kimi / Moonshot ─────────────────────────────────────────────
+    # K2.6: 1T MoE，256K context，多模态，SWE-Bench Pro 58.6%
+    # K2.5: 上一代，256K context
     {"id": "kimi", "name": "Kimi / Moonshot", "base_url": "https://api.moonshot.cn/anthropic",
      "models": ["kimi-k2.6", "kimi-k2.5", "kimi-k2-thinking-turbo", "moonshot-v1-128k"],
-     "key_hint": "sk-...", "note": "国产，K2.6 最新，长上下文"},
+     "key_hint": "sk-...", "note": "国产，K2.6 最新，1T MoE，256K context，多模态"},
+
+    # ── 豆包 / 火山引擎 ─────────────────────────────────────────────
+    # Seed-1.6: 230B MoE，256K context，自适应思考
+    # Seed-1.6-thinking: 深度推理模式
+    # Seed-1.6-flash: 低延迟版本
     {"id": "doubao", "name": "豆包 / 火山引擎", "base_url": "https://ark.cn-beijing.volces.com/api/v3/anthropic",
-     "models": ["doubao-seed-1.6", "doubao-seed-1.6-thinking", "doubao-1.5-pro-256k"],
-     "key_hint": "粘贴火山引擎 API Key", "note": "字节跳动，Seed 1.6 最新"},
+     "models": ["doubao-seed-1.6", "doubao-seed-1.6-thinking", "doubao-seed-1.6-flash", "doubao-1.5-pro-256k"],
+     "key_hint": "粘贴火山引擎 API Key", "note": "字节跳动，Seed 1.6 最新，256K context，多模态"},
+
+    # ── 通义千问 / 阿里云 ───────────────────────────────────────────
+    # Qwen3.6-Plus: 1M context，SWE-Bench 78.8%，Terminal-Bench 61.6%
+    # Qwen3.6-35B-A3B: 开源版，35B total / 3B active
+    # qwen3-max: 上一代旗舰
     {"id": "dashscope", "name": "通义千问 / 阿里", "base_url": "https://dashscope.aliyuncs.com/compatible-mode/anthropic",
-     "models": ["qwen3.6-plus", "qwen3.6-35b-a3b", "qwen3-max", "qwen-max-latest"],
-     "key_hint": "sk-...", "note": "阿里云，Qwen 3.6 最新"},
+     "models": ["qwen3.6-plus", "qwen3.6-35b-a3b", "qwen3-coder-plus", "qwen3-max", "qwen-max-latest"],
+     "key_hint": "sk-...", "note": "阿里云，Qwen3.6-Plus 最新，1M context，编码 SOTA"},
+
+    # ── SiliconFlow 硅基流动 ────────────────────────────────────────
+    # 国产聚合推理平台，托管主流开源模型，Anthropic 兼容端点
     {"id": "siliconflow", "name": "SiliconFlow (硅基流动)", "base_url": "https://api.siliconflow.cn/anthropic",
-     "models": ["deepseek-v4-pro", "qwen3.6-plus", "claude-sonnet-4.6"],
-     "key_hint": "sk-...", "note": "国产聚合，多模型一站式"},
+     "models": [
+         "deepseek-ai/DeepSeek-V4-Pro",
+         "deepseek-ai/DeepSeek-V4-Flash",
+         "Qwen/Qwen3.6-Plus",
+         "zai-org/GLM-5.1",
+         "moonshotai/Kimi-K2.6",
+     ],
+     "key_hint": "sk-...", "note": "国产聚合，托管 DeepSeek/Qwen/GLM/Kimi，一站式"},
+
+    # ── Google Gemini ───────────────────────────────────────────────
+    # 通过 Google AI Studio 的 Anthropic 兼容端点访问
+    # Gemini 3.1 Pro: 长上下文，工具调用，agentic
+    # Gemini 3.5 Flash: 高效率，接近 Pro 水平
+    {"id": "gemini", "name": "Google Gemini", "base_url": "https://generativelanguage.googleapis.com/v1beta/anthropic",
+     "models": ["gemini-3.1-pro-preview", "gemini-3.5-flash", "gemini-3-pro-preview", "gemini-3-flash-preview"],
+     "key_hint": "AIza...", "note": "Google，Gemini 3.1 Pro 最新，1M context，多模态"},
+
+    # ── xAI Grok ────────────────────────────────────────────────────
+    # Grok-4: 256K context，并行工具调用，图文输入
+    {"id": "xai", "name": "xAI Grok", "base_url": "https://api.x.ai/v1/anthropic",
+     "models": ["grok-4", "grok-3", "grok-3-mini"],
+     "key_hint": "xai-...", "note": "xAI，Grok-4 最新，256K context，推理强"},
+
+    # ── Groq ────────────────────────────────────────────────────────
+    # 超快 LPU 推理，>460 tok/s
+    # Llama-4-Scout: 10M context，多模态
+    # Llama-4-Maverick: 128 experts，更强推理
+    # compound-beta: Groq 自研 agentic 系统（含 web search）
     {"id": "groq", "name": "Groq", "base_url": "https://api.groq.com/anthropic",
-     "models": ["llama-4-scout-17b-16e-instruct", "llama-3.3-70b-versatile"],
-     "key_hint": "gsk_...", "note": "超快推理，免费额度"},
+     "models": [
+         "meta-llama/llama-4-scout-17b-16e-instruct",
+         "meta-llama/llama-4-maverick-17b-128e-instruct",
+         "compound-beta",
+         "llama-3.3-70b-versatile",
+     ],
+     "key_hint": "gsk_...", "note": "超快 LPU 推理 >460 tok/s，Llama-4 最新，免费额度"},
+
+    # ── 自定义 ──────────────────────────────────────────────────────
     {"id": "custom", "name": "自定义 / 中转站", "base_url": "",
      "models": [], "custom": True,
      "key_hint": "粘贴中转站 API Key", "note": "填写任意 Anthropic 兼容端点的 base_url"},
@@ -190,9 +270,15 @@ def save_provider(name, base_url, api_key, model):
     }
     if model:
         env["ANTHROPIC_MODEL"] = model
-        env["ANTHROPIC_DEFAULT_SONNET_MODEL"] = model
-        env["ANTHROPIC_DEFAULT_OPUS_MODEL"] = model
-        env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = model
+        # Only set the Anthropic-specific model aliases when the endpoint
+        # is actually Anthropic-shaped (api.anthropic.com or a proxy that
+        # uses Anthropic model names). For third-party providers like
+        # DeepSeek / Gemini / Grok, setting these aliases to a non-Claude
+        # model name confuses Claude Code's model-selection logic.
+        if "anthropic.com" in base_url or "openrouter.ai" in base_url:
+            env["ANTHROPIC_DEFAULT_SONNET_MODEL"] = model
+            env["ANTHROPIC_DEFAULT_OPUS_MODEL"] = model
+            env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = model
     settings = {"env": env}
     meta = {"apiFormat": "anthropic"}
 
@@ -364,7 +450,6 @@ def read_logs(max_lines=200):
 def run_diagnose():
     """Run a quick environment self-check. Returns a list of (label, ok,
     detail) tuples for the UI to render as a checklist."""
-    import shutil
     checks = []
 
     def add(label, ok, detail=""):
@@ -391,11 +476,11 @@ def run_diagnose():
         add("数据目录可写", True, str(DATA_DIR))
     except Exception as e:
         add("数据目录可写", False, str(e))
-    # 5. python3 (we're running, so yes) + sqlite3 module
+    # 5. python3 (we're running, so yes)
     add("Python3 运行时", True, sys.version.split()[0])
     # 6. network reachability (best-effort, 5s)
     net_ok = False
-    net_detail = "无法连接 api.anthropic.com"
+    net_detail = "无法连接"
     try:
         import ssl
         ctx = None
@@ -421,7 +506,6 @@ def run_diagnose():
     except Exception:
         pass
     add("网络连通", net_ok, net_detail)
-    _ = shutil  # silence unused on some platforms
     return checks
 
 
@@ -506,15 +590,52 @@ def test_key(base_url, api_key, model):
     TLS resilience: portable Pythons sometimes ship without a usable
     system trust store (locked-down corp machines, USB installs). Try
     certifi first if available, then fall back to the default context.
-    Same approach as the OpenClaw / Hermes config centers."""
+    Same approach as the OpenClaw / Hermes config centers.
+
+    Fallback model selection: if the caller didn't specify a model, pick
+    a sensible default based on the base_url so we don't send a Claude
+    model name to a DeepSeek/Groq endpoint (which would 400/404)."""
     import ssl
     base_url = (base_url or "").strip().rstrip("/")
     api_key = (api_key or "").strip()
     if not base_url or not api_key:
         return False, "缺少 base_url 或 api_key"
+
+    # Pick a safe fallback model when none is specified.
+    # For Anthropic-native endpoints use a Claude model; for third-party
+    # providers use their own cheapest/fastest model so the test doesn't
+    # fail with "model not found".
+    if not model:
+        if "anthropic.com" in base_url:
+            model = "claude-haiku-4-5"
+        elif "deepseek.com" in base_url:
+            model = "deepseek-v4-flash"
+        elif "moonshot" in base_url or "kimi" in base_url:
+            model = "kimi-k2.5"
+        elif "bigmodel" in base_url or "zhipu" in base_url:
+            model = "glm-4.5-flash"
+        elif "minimax" in base_url or "minimaxi" in base_url:
+            model = "MiniMax-M2"
+        elif "volces.com" in base_url or "doubao" in base_url:
+            model = "doubao-seed-1.6-flash"
+        elif "dashscope" in base_url or "aliyun" in base_url:
+            model = "qwen3.6-35b-a3b"
+        elif "siliconflow" in base_url:
+            model = "deepseek-ai/DeepSeek-V4-Flash"
+        elif "groq.com" in base_url:
+            model = "llama-3.3-70b-versatile"
+        elif "x.ai" in base_url:
+            model = "grok-3-mini"
+        elif "generativelanguage" in base_url:
+            model = "gemini-3.5-flash"
+        elif "openrouter.ai" in base_url:
+            model = "anthropic/claude-haiku-4-5"
+        else:
+            model = "claude-haiku-4-5"  # generic fallback
+
     url = base_url + "/v1/messages"
     body = json.dumps({
-        "model": model or "claude-haiku-4-5",
+        "model": model,
         "max_tokens": 1,
         "messages": [{"role": "user", "content": "hi"}],
     }).encode()
