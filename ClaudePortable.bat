@@ -65,14 +65,16 @@ goto :after_unlock
 :do_config
 set "CONFIG_SERVER=%LIB_DIR%\config_server.py"
 if exist "%CONFIG_SERVER%" (
-  where python3 >nul 2>&1 && (
-    echo   Opening config center at http://127.0.0.1:17580 ...
-    python3 "%CONFIG_SERVER%"
-    exit /b 0
+  set "PY_CMD="
+  where python3 >nul 2>&1 && python3 --version >nul 2>&1 && set "PY_CMD=python3"
+  if not defined PY_CMD (
+    for /f "delims=" %%V in ('python --version 2^>^&1') do (
+      echo %%V | findstr /i "Python [0-9]" >nul 2>&1 && set "PY_CMD=python"
+    )
   )
-  where python >nul 2>&1 && (
+  if defined PY_CMD (
     echo   Opening config center at http://127.0.0.1:17580 ...
-    python "%CONFIG_SERVER%"
+    !PY_CMD! "%CONFIG_SERVER%"
     exit /b 0
   )
 )
@@ -239,40 +241,38 @@ echo.
 
 REM Try config center (python3 + lib\config_server.py) first.
 REM It provides a rich browser-based onboarding wizard.
+REM Note: on Windows, 'python' might be the Microsoft Store stub that
+REM opens the Store instead of running scripts. We verify by running
+REM 'python --version' and checking it actually outputs something.
 set "CONFIG_SERVER=%LIB_DIR%\config_server.py"
 set "USED_CONFIG_CENTER=0"
+set "PY_CMD="
 if exist "%CONFIG_SERVER%" (
   where python3 >nul 2>&1 && (
-    echo   Opening config center at http://127.0.0.1:17580 ...
-    echo   Follow the wizard: pick provider, paste key, test, save.
-    echo.
-    set "CLAUDE_BROWSER_OPENED=1"
-    start "" /b python3 "%CONFIG_SERVER%"
-    set "WE_STARTED_CCS=1"
-    set "USED_CONFIG_CENTER=1"
+    python3 --version >nul 2>&1 && set "PY_CMD=python3"
   )
-  if "!USED_CONFIG_CENTER!"=="0" (
-    where python >nul 2>&1 && (
-      echo   Opening config center at http://127.0.0.1:17580 ...
-      echo.
-      set "CLAUDE_BROWSER_OPENED=1"
-      start "" /b python "%CONFIG_SERVER%"
-      set "WE_STARTED_CCS=1"
-      set "USED_CONFIG_CENTER=1"
+  if not defined PY_CMD (
+    for /f "delims=" %%V in ('python --version 2^>^&1') do (
+      echo %%V | findstr /i "Python [0-9]" >nul 2>&1 && set "PY_CMD=python"
     )
   )
 )
-if "!USED_CONFIG_CENTER!"=="0" (
-  if exist "%BIN_DIR%\cc-switch.exe" (
+if defined PY_CMD (
+    echo   Opening config center at http://127.0.0.1:17580 ...
+    echo   Follow the wizard: pick provider, paste key, test, save.
+    echo.
+    start "" /b !PY_CMD! "%CONFIG_SERVER%"
+    set "WE_STARTED_CCS=1"
+    set "USED_CONFIG_CENTER=1"
+) else if exist "%BIN_DIR%\cc-switch.exe" (
     echo   Opening CC Switch GUI...
     echo   Add a Provider and save.
     echo.
     start "" "%BIN_DIR%\cc-switch.exe"
     set "WE_STARTED_CCS=1"
-  ) else (
+) else (
     echo   [!] No python3 and no cc-switch.exe found. Cannot configure.
     goto :error_cleanup
-  )
 )
 
 echo   Waiting for provider configuration...
