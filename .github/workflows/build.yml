@@ -171,6 +171,21 @@ jobs:
             rm -f bin/windows-x64/sqlite3.exe
           fi
 
+          # Windows: embed Python for config_server.py (zero host dependency).
+          # The embeddable package is ~15MB unzipped, includes sqlite3 module.
+          # This makes the config center work on any Windows without Python installed.
+          echo "  Downloading Python embeddable (for config center)..."
+          PY_VER="3.12.7"
+          curl -fsSL --retry 3 -o /tmp/python-embed.zip \
+            "https://www.python.org/ftp/python/${PY_VER}/python-${PY_VER}-embed-amd64.zip" || true
+          if [ -f /tmp/python-embed.zip ] && [ -s /tmp/python-embed.zip ]; then
+            mkdir -p bin/windows-x64/python
+            unzip -qo /tmp/python-embed.zip -d bin/windows-x64/python
+            echo "    OK: Python ${PY_VER} embeddable ($(du -sh bin/windows-x64/python | cut -f1))"
+          else
+            echo "    WARN: Python embed download failed (config center needs host Python)"
+          fi
+
       - name: Set executable permissions
         run: |
           chmod +x bin/*/claude 2>/dev/null || true

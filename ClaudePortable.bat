@@ -54,13 +54,16 @@ goto :after_unlock
 
 :do_config
 set "CONFIG_SERVER=%LIB_DIR%\config_server.py"
+set "PY_CMD="
 if exist "%CONFIG_SERVER%" (
-  set "PY_CMD="
   where python3 >nul 2>&1 && python3 --version >nul 2>&1 && set "PY_CMD=python3"
   if not defined PY_CMD (
     for /f "delims=" %%V in ('python --version 2^>^&1') do (
       echo %%V | findstr /i "Python [0-9]" >nul 2>&1 && set "PY_CMD=python"
     )
+  )
+  if not defined PY_CMD (
+    if exist "%BIN_DIR%\python\python.exe" set "PY_CMD=%BIN_DIR%\python\python.exe"
   )
   if defined PY_CMD (
     echo   Opening config center at http://127.0.0.1:17580 ...
@@ -72,7 +75,7 @@ if exist "%BIN_DIR%\cc-switch.exe" (
   start "" "%BIN_DIR%\cc-switch.exe"
   exit /b 0
 )
-echo   [!] No python3 and no cc-switch.exe found.
+echo   [!] No python and no cc-switch.exe found.
 pause
 exit /b 1
 
@@ -231,9 +234,7 @@ echo.
 
 REM Try config center (python3 + lib\config_server.py) first.
 REM It provides a rich browser-based onboarding wizard.
-REM Note: on Windows, 'python' might be the Microsoft Store stub that
-REM opens the Store instead of running scripts. We verify by running
-REM 'python --version' and checking it actually outputs something.
+REM Priority: system python3 > system python > bundled python embed > cc-switch
 set "CONFIG_SERVER=%LIB_DIR%\config_server.py"
 set "USED_CONFIG_CENTER=0"
 set "PY_CMD="
@@ -245,6 +246,9 @@ if exist "%CONFIG_SERVER%" (
     for /f "delims=" %%V in ('python --version 2^>^&1') do (
       echo %%V | findstr /i "Python [0-9]" >nul 2>&1 && set "PY_CMD=python"
     )
+  )
+  if not defined PY_CMD (
+    if exist "%BIN_DIR%\python\python.exe" set "PY_CMD=%BIN_DIR%\python\python.exe"
   )
 )
 if defined PY_CMD (
