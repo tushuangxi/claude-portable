@@ -390,14 +390,19 @@ try:
         env = cfg.get('env', {})
         bu = env.get('ANTHROPIC_BASE_URL', '')
         ak = env.get('ANTHROPIC_AUTH_TOKEN', '') or env.get('ANTHROPIC_API_KEY', '')
+        md = env.get('ANTHROPIC_MODEL', '')
         # Trim whitespace — cc-switch may store keys with trailing whitespace
         # if user pasted with extra characters. Without this, claude API
         # calls would 404/401 on the malformed credential.
         if isinstance(bu, str): bu = bu.strip()
         if isinstance(ak, str): ak = ak.strip()
+        if isinstance(md, str): md = md.strip()
         if bu and ak:
             print(bu)
             print(ak)
+            # 3rd line: model (may be empty). Always print so the reader's
+            # line indexing is stable.
+            print(md)
 except Exception:
     pass
 PYEOF
@@ -405,8 +410,14 @@ PYEOF
             if [ -n "$result" ]; then
                 # 用 printf 而不是 echo 避免反斜杠转义问题
                 # （某些 echo 实现会解释 \n、\t 等）
-                export ANTHROPIC_BASE_URL=$(printf '%s\n' "$result" | head -1)
-                export ANTHROPIC_AUTH_TOKEN=$(printf '%s\n' "$result" | tail -1)
+                export ANTHROPIC_BASE_URL=$(printf '%s\n' "$result" | sed -n '1p')
+                export ANTHROPIC_AUTH_TOKEN=$(printf '%s\n' "$result" | sed -n '2p')
+                local _md=$(printf '%s\n' "$result" | sed -n '3p')
+                if [ -n "$_md" ]; then
+                    export ANTHROPIC_MODEL="$_md"
+                else
+                    unset ANTHROPIC_MODEL
+                fi
                 unset ANTHROPIC_API_KEY
                 return 0
             fi
@@ -425,16 +436,23 @@ PYEOF
             if [ -n "$row" ]; then
                 # 极简 JSON 解析：只抽 ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN
                 # （实际 row 是 cfg.settings_config，里面是 {"env":{...}}）
-                local bu ak
+                local bu ak md
                 bu=$(printf '%s' "$row" | sed -nE 's/.*"ANTHROPIC_BASE_URL"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' | head -1)
                 ak=$(printf '%s' "$row" | sed -nE 's/.*"ANTHROPIC_AUTH_TOKEN"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' | head -1)
                 [ -z "$ak" ] && ak=$(printf '%s' "$row" | sed -nE 's/.*"ANTHROPIC_API_KEY"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' | head -1)
+                md=$(printf '%s' "$row" | sed -nE 's/.*"ANTHROPIC_MODEL"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' | head -1)
                 # 去前后空白
                 bu=$(printf '%s' "$bu" | awk '{$1=$1};1')
                 ak=$(printf '%s' "$ak" | awk '{$1=$1};1')
+                md=$(printf '%s' "$md" | awk '{$1=$1};1')
                 if [ -n "$bu" ] && [ -n "$ak" ]; then
                     export ANTHROPIC_BASE_URL="$bu"
                     export ANTHROPIC_AUTH_TOKEN="$ak"
+                    if [ -n "$md" ]; then
+                        export ANTHROPIC_MODEL="$md"
+                    else
+                        unset ANTHROPIC_MODEL
+                    fi
                     unset ANTHROPIC_API_KEY
                     return 0
                 fi

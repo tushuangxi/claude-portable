@@ -353,19 +353,28 @@ try:
         env = cfg.get('env', {})
         bu = env.get('ANTHROPIC_BASE_URL', '')
         ak = env.get('ANTHROPIC_AUTH_TOKEN', '') or env.get('ANTHROPIC_API_KEY', '')
+        md = env.get('ANTHROPIC_MODEL', '')
         # Trim whitespace defensively (see .command for rationale).
         if isinstance(bu, str): bu = bu.strip()
         if isinstance(ak, str): ak = ak.strip()
+        if isinstance(md, str): md = md.strip()
         if bu and ak:
             print(bu)
             print(ak)
+            print(md)
 except Exception:
     pass
 PYEOF
 )
             if [ -n "$result" ]; then
-                export ANTHROPIC_BASE_URL=$(printf '%s\n' "$result" | head -1)
-                export ANTHROPIC_AUTH_TOKEN=$(printf '%s\n' "$result" | tail -1)
+                export ANTHROPIC_BASE_URL=$(printf '%s\n' "$result" | sed -n '1p')
+                export ANTHROPIC_AUTH_TOKEN=$(printf '%s\n' "$result" | sed -n '2p')
+                local _md=$(printf '%s\n' "$result" | sed -n '3p')
+                if [ -n "$_md" ]; then
+                    export ANTHROPIC_MODEL="$_md"
+                else
+                    unset ANTHROPIC_MODEL
+                fi
                 unset ANTHROPIC_API_KEY
                 return 0
             fi
@@ -380,15 +389,22 @@ PYEOF
             row=$(sqlite3 -readonly "$CCS_DB" \
                 "SELECT settings_config FROM providers WHERE app_type='claude' AND is_current=1 LIMIT 1;" 2>/dev/null)
             if [ -n "$row" ]; then
-                local bu ak
+                local bu ak md
                 bu=$(printf '%s' "$row" | sed -nE 's/.*"ANTHROPIC_BASE_URL"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' | head -1)
                 ak=$(printf '%s' "$row" | sed -nE 's/.*"ANTHROPIC_AUTH_TOKEN"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' | head -1)
                 [ -z "$ak" ] && ak=$(printf '%s' "$row" | sed -nE 's/.*"ANTHROPIC_API_KEY"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' | head -1)
+                md=$(printf '%s' "$row" | sed -nE 's/.*"ANTHROPIC_MODEL"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' | head -1)
                 bu=$(printf '%s' "$bu" | awk '{$1=$1};1')
                 ak=$(printf '%s' "$ak" | awk '{$1=$1};1')
+                md=$(printf '%s' "$md" | awk '{$1=$1};1')
                 if [ -n "$bu" ] && [ -n "$ak" ]; then
                     export ANTHROPIC_BASE_URL="$bu"
                     export ANTHROPIC_AUTH_TOKEN="$ak"
+                    if [ -n "$md" ]; then
+                        export ANTHROPIC_MODEL="$md"
+                    else
+                        unset ANTHROPIC_MODEL
+                    fi
                     unset ANTHROPIC_API_KEY
                     return 0
                 fi

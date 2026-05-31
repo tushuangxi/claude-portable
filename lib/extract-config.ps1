@@ -1,5 +1,13 @@
-# Extract ANTHROPIC_BASE_URL and ANTHROPIC_AUTH_TOKEN from cc-switch.db
-# Writes URL on line 1, key on line 2 to stdout. Exit 0 on success, 1 otherwise.
+# Extract ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN / ANTHROPIC_MODEL from cc-switch.db
+# Writes URL on line 1, key on line 2, model on line 3 (omitted if empty)
+# to stdout. Exit 0 on success, 1 otherwise.
+#
+# Why model matters: the config center lets users pick a model (e.g.
+# deepseek-v4-pro). cc-switch stores it as ANTHROPIC_MODEL. If the
+# launcher doesn't pass it through, Claude Code falls back to its built-in
+# default name (Opus 4.8) in the UI even though requests go to the
+# configured endpoint — confusing users into thinking the wrong model
+# is active. Emitting it here lets the .bat export it before launch.
 #
 # Why stdout instead of temp files: writing the API key to %TEMP%\*.txt
 # leaks it indefinitely if the launcher crashes between write and delete.
@@ -13,15 +21,17 @@ param(
 
 if (-not (Test-Path $DbPath)) { exit 1 }
 
-# Helper: emit URL + key on stdout if both look valid, then exit 0.
+# Helper: emit URL + key (+ optional model) on stdout if URL and key
+# both look valid, then exit 0.
 # Force ASCII output via raw byte writes — UTF-8 output without BOM
 # avoids cmd's `for /f` picking up encoding garbage in the first line.
 # API URLs and auth tokens are ASCII anyway.
 function Emit-Pair {
-    param([string]$Url, [string]$Key)
+    param([string]$Url, [string]$Key, [string]$Model)
     if (-not $Url -or -not $Key) { return $false }
     $u = $Url.Trim()
     $k = $Key.Trim()
+    $m = if ($Model) { $Model.Trim() } else { "" }
     if ($u.Length -lt 6 -or $k.Length -lt 6) { return $false }
     # Refuse multi-line content — defense against injection if cc-switch
     # ever stored a value containing a newline. cmd's `set "X=..."`
@@ -31,8 +41,12 @@ function Emit-Pair {
     # In practice API keys/URLs are ASCII; if not, the user has a bigger
     # problem than this script.
     if ($u -match "[^\x20-\x7e]" -or $k -match "[^\x20-\x7e]") { return $false }
+    # Model name: only emit if it's clean single-line ASCII. A bad model
+    # value must not block launch — just drop it and let Claude default.
+    if ($m -match "[\r\n]" -or $m -match "[^\x20-\x7e]") { $m = "" }
     [Console]::Out.WriteLine($u)
     [Console]::Out.WriteLine($k)
+    [Console]::Out.WriteLine($m)
     return $true
 }
 
@@ -55,7 +69,8 @@ try {
         $e = $cfg.env
         $url = $e.ANTHROPIC_BASE_URL
         $key = if ($e.ANTHROPIC_AUTH_TOKEN) { $e.ANTHROPIC_AUTH_TOKEN } else { $e.ANTHROPIC_API_KEY }
-        if (Emit-Pair $url $key) { exit 0 }
+        $model = $e.ANTHROPIC_MODEL
+        if (Emit-Pair $url $key $model) { exit 0 }
     }
 } catch {}
 
@@ -70,7 +85,8 @@ try {
             $e = $cfg.env
             $url = $e.ANTHROPIC_BASE_URL
             $key = if ($e.ANTHROPIC_AUTH_TOKEN) { $e.ANTHROPIC_AUTH_TOKEN } else { $e.ANTHROPIC_API_KEY }
-            if (Emit-Pair $url $key) { exit 0 }
+            $model = $e.ANTHROPIC_MODEL
+            if (Emit-Pair $url $key $model) { exit 0 }
         }
     }
 } catch {}
@@ -125,6 +141,7 @@ try {
     if ($keyMatches.Count -eq 0) {
         $keyMatches = [regex]::Matches($text, '"ANTHROPIC_API_KEY"\s*:\s*"([^"]+)"')
     }
+    $modelMatches = [regex]::Matches($text, '"ANTHROPIC_MODEL"\s*:\s*"([^"]+)"')
 
     if ($urlMatches.Count -gt 0 -and $keyMatches.Count -gt 0) {
         if ($urlMatches.Count -gt 1 -or $keyMatches.Count -gt 1) {
@@ -132,7 +149,15 @@ try {
         }
         $url = $urlMatches[$urlMatches.Count - 1].Groups[1].Value
         $key = $keyMatches[$keyMatches.Count - 1].Groups[1].Value
-        if (Emit-Pair $url $key) { exit 0 }
+        # Model is best-effort in the fallback: pick the last match if any.
+        # It may not correspond to the same provider as url/key when the
+        # DB has multiple rows, but a wrong/empty model only affects the
+        # display name, never the endpoint the request hits.
+        $model = ""
+        if ($modelMatches.Count -gt 0) {
+            $model = $modelMatches[$modelMatches.Count - 1].Groups[1].Value
+        }
+        if (Emit-Pair $url $key $model) { exit 0 }
     }
 } catch {}
 

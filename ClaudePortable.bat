@@ -7,6 +7,7 @@ REM Clear conflicting auth vars from inherited environment
 set "ANTHROPIC_API_KEY="
 set "ANTHROPIC_AUTH_TOKEN="
 set "ANTHROPIC_BASE_URL="
+set "ANTHROPIC_MODEL="
 
 echo.
 echo      YLYG - Claude Code Portable
@@ -325,6 +326,7 @@ if exist "%LIB_DIR%\extract-config.ps1" (
         set /a LINE_NUM+=1
         if "!LINE_NUM!"=="1" set "ANTHROPIC_BASE_URL=%%L"
         if "!LINE_NUM!"=="2" set "ANTHROPIC_AUTH_TOKEN=%%L"
+        if "!LINE_NUM!"=="3" set "ANTHROPIC_MODEL=%%L"
       )
       if "!ANTHROPIC_AUTH_TOKEN!"=="" timeout /t 2 >nul 2>&1
     )
