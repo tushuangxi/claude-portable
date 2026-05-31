@@ -8,12 +8,8 @@ set "ANTHROPIC_API_KEY="
 set "ANTHROPIC_AUTH_TOKEN="
 set "ANTHROPIC_BASE_URL="
 
-REM Enable ANSI escape codes
-for /F %%a in ('echo prompt $E ^| cmd') do set "ESC=%%a"
-
 echo.
-echo %ESC%[38;5;220m     Claude Code Portable%ESC%[0m
-echo %ESC%[38;5;214m     ----------------------%ESC%[0m
+echo      Claude Code Portable
 echo.
 
 set "SCRIPT_DIR=%~dp0"
