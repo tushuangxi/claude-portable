@@ -55,25 +55,44 @@ SERVER_TOKEN = secrets.token_hex(32)
 # Each provider maps to an Anthropic-compatible base_url. Claude Code
 # talks the Anthropic wire protocol, so third-party providers must
 # expose an /anthropic-compatible endpoint (most aggregators do).
+# Models updated 2026-05-31.
 PROVIDERS = [
     {"id": "anthropic", "name": "Anthropic 官方", "base_url": "https://api.anthropic.com",
-     "models": ["claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5"],
-     "key_hint": "sk-ant-...", "note": "官方直连，需要 Anthropic 账号"},
+     "models": ["claude-opus-4-8", "claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5"],
+     "key_hint": "sk-ant-...", "note": "官方直连，最新 Opus 4.8 (1M context)"},
+    {"id": "openrouter", "name": "OpenRouter", "base_url": "https://openrouter.ai/api",
+     "models": ["anthropic/claude-opus-4.8", "anthropic/claude-opus-4.7",
+                "anthropic/claude-sonnet-4.6", "anthropic/claude-haiku-4.5",
+                "google/gemini-3.1-pro-preview", "openai/gpt-5.5",
+                "deepseek/deepseek-v4-pro", "x-ai/grok-4.3"],
+     "key_hint": "sk-or-...", "note": "聚合平台，一个 Key 用所有模型"},
     {"id": "minimax", "name": "MiniMax (海螺)", "base_url": "https://api.minimaxi.com/anthropic",
-     "models": ["MiniMax-M2.7", "MiniMax-M2.5"],
-     "key_hint": "粘贴 MiniMax API Key", "note": "国产，Anthropic 兼容端点"},
+     "models": ["MiniMax-M2.7", "MiniMax-M2.7-highspeed", "MiniMax-M2.5"],
+     "key_hint": "粘贴 MiniMax API Key", "note": "国产，Anthropic 兼容，速度快"},
     {"id": "deepseek", "name": "DeepSeek", "base_url": "https://api.deepseek.com/anthropic",
-     "models": ["deepseek-chat", "deepseek-reasoner"],
-     "key_hint": "sk-...", "note": "国产，性价比高"},
+     "models": ["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-chat", "deepseek-reasoner"],
+     "key_hint": "sk-...", "note": "国产，性价比极高，V4 系列最新"},
     {"id": "zhipu", "name": "智谱 GLM", "base_url": "https://open.bigmodel.cn/api/anthropic",
-     "models": ["glm-4.6", "glm-4.5-air"],
-     "key_hint": "粘贴智谱 API Key", "note": "国产"},
+     "models": ["glm-5.1", "glm-5", "glm-4.6", "glm-4.5-air", "glm-4.5-flash"],
+     "key_hint": "粘贴智谱 API Key", "note": "国产，GLM-5 系列最新"},
     {"id": "kimi", "name": "Kimi / Moonshot", "base_url": "https://api.moonshot.cn/anthropic",
-     "models": ["kimi-k2-thinking", "moonshot-v1-128k"],
-     "key_hint": "sk-...", "note": "国产，长上下文"},
+     "models": ["kimi-k2.6", "kimi-k2.5", "kimi-k2-thinking-turbo", "moonshot-v1-128k"],
+     "key_hint": "sk-...", "note": "国产，K2.6 最新，长上下文"},
+    {"id": "doubao", "name": "豆包 / 火山引擎", "base_url": "https://ark.cn-beijing.volces.com/api/v3/anthropic",
+     "models": ["doubao-seed-1.6", "doubao-seed-1.6-thinking", "doubao-1.5-pro-256k"],
+     "key_hint": "粘贴火山引擎 API Key", "note": "字节跳动，Seed 1.6 最新"},
+    {"id": "dashscope", "name": "通义千问 / 阿里", "base_url": "https://dashscope.aliyuncs.com/compatible-mode/anthropic",
+     "models": ["qwen3.6-plus", "qwen3.6-35b-a3b", "qwen3-max", "qwen-max-latest"],
+     "key_hint": "sk-...", "note": "阿里云，Qwen 3.6 最新"},
+    {"id": "siliconflow", "name": "SiliconFlow (硅基流动)", "base_url": "https://api.siliconflow.cn/anthropic",
+     "models": ["deepseek-v4-pro", "qwen3.6-plus", "claude-sonnet-4.6"],
+     "key_hint": "sk-...", "note": "国产聚合，多模型一站式"},
+    {"id": "groq", "name": "Groq", "base_url": "https://api.groq.com/anthropic",
+     "models": ["llama-4-scout-17b-16e-instruct", "llama-3.3-70b-versatile"],
+     "key_hint": "gsk_...", "note": "超快推理，免费额度"},
     {"id": "custom", "name": "自定义 / 中转站", "base_url": "",
      "models": [], "custom": True,
-     "key_hint": "粘贴中转站 API Key", "note": "填写中转站/自建网关的 base_url"},
+     "key_hint": "粘贴中转站 API Key", "note": "填写任意 Anthropic 兼容端点的 base_url"},
 ]
 
 
@@ -428,6 +447,56 @@ def unbind_device():
     return removed
 
 
+def launch_ccswitch():
+    """Launch the bundled cc-switch GUI as a detached background process.
+
+    The config center is the primary onboarding path, but cc-switch is a
+    full native GUI with extra features (failover queues, multi-app
+    management). Users who prefer it can start it from here.
+
+    Returns (ok, message). We never block: Popen returns immediately and
+    we don't wait on the GUI. Uses list-form args (no shell=True) so a
+    weird install path can't inject a command.
+    """
+    plat = _platform_dir()
+    exe = "cc-switch.exe" if os.name == "nt" else "cc-switch"
+    ccbin = PORTABLE_ROOT / "bin" / plat / exe
+    if not ccbin.exists():
+        return False, f"未找到 CC Switch 可执行文件：bin/{plat}/{exe}"
+    try:
+        import subprocess
+        kwargs = {
+            "cwd": str(ccbin.parent),
+            "stdout": subprocess.DEVNULL,
+            "stderr": subprocess.DEVNULL,
+            "stdin": subprocess.DEVNULL,
+        }
+        if os.name == "nt":
+            # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP: fully detach so
+            # the GUI survives after the config center process exits, and
+            # doesn't get killed when this console window closes.
+            kwargs["creationflags"] = 0x00000008 | 0x00000200
+        else:
+            # New session so SIGINT to the launcher terminal doesn't reach
+            # the GUI; also reparents to init on exit.
+            kwargs["start_new_session"] = True
+            # On macOS the binary may carry a quarantine xattr; best-effort
+            # strip it so Gatekeeper doesn't block the spawn.
+            if sys.platform == "darwin":
+                try:
+                    subprocess.run(["xattr", "-dr", "com.apple.quarantine",
+                                    str(ccbin)], timeout=5,
+                                   stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL)
+                    os.chmod(ccbin, 0o755)
+                except Exception:
+                    pass
+        subprocess.Popen([str(ccbin)], **kwargs)
+        return True, "CC Switch 已启动"
+    except Exception as e:
+        return False, f"启动失败: {str(e)[:160]}"
+
+
 # ═══════════════════════════════════════════════════════════════
 #  API key connectivity test
 # ═══════════════════════════════════════════════════════════════
@@ -635,6 +704,9 @@ class Handler(BaseHTTPRequestHandler):
             elif self.path == "/api/unbind":
                 removed = unbind_device()
                 self._json({"ok": True, "removed": removed})
+            elif self.path == "/api/launch-ccswitch":
+                ok, msg = launch_ccswitch()
+                self._json({"ok": ok, "message": msg})
             elif self.path == "/api/export":
                 self._json(export_config())
             else:
