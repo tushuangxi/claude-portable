@@ -146,7 +146,7 @@ a:hover{text-decoration:underline}
  <div class="hero">
   <span class="label-xs op-7" style="letter-spacing:.15rem">claude code · portable</span>
   <h1 class="display">Claude Code Portable</h1>
-  <p class="sub">便携版 Claude Code + CC Switch · 零安装，即插即用</p>
+  <p class="sub">便携版 Claude Code + 浏览器配置中心 · 零安装，即插即用</p>
   <div class="term" aria-hidden="true">
   <div class="term-h">
    <span class="td"></span><span class="td"></span><span class="td"></span>
@@ -156,7 +156,8 @@ a:hover{text-decoration:underline}
 <span class="t" style="color:var(--accent)">  ██╗   ██╗██╗  ██╗   ██╗ ██████╗</span>
 <span class="t" style="color:var(--accent)">   ╚████╔╝ ██║   ╚████╔╝ ██║  ███╗</span>
 <span class="t" style="opacity:.5">     Claude Code Portable</span>
-<span class="t" style="opacity:.5">  Mode: CC Switch Proxy (port 15721)</span>
+<span class="t" style="opacity:.5">  配置中心: http://127.0.0.1:17580</span>
+<span class="t" style="opacity:.5">  [ok] Provider detected · Config loaded</span>
 <span class="p">></span><span class="blink"></span></div>
   </div>
  </div>
@@ -196,16 +197,15 @@ a:hover{text-decoration:underline}
  <div class="step">
   <span class="step-num">3</span>
   <div class="step-content">
-   <div class="step-title">出现 CC Switch 窗口（如果是首次配置）</div>
-   <p>如果 U 盘是<strong>全新未配置</strong>的，会自动弹出 <strong>CC Switch</strong> 图形界面。在里面：</p>
+   <div class="step-title">浏览器自动打开"配置中心"（如果是首次配置）</div>
+   <p>如果 U 盘是<strong>全新未配置</strong>的，会自动打开浏览器进入<strong>配置中心</strong>（地址 <code>http://127.0.0.1:17580</code>）。跟着向导四步走：</p>
    <ul style="margin:6px 0 6px 18px">
-    <li>点 <strong>"添加 Provider"</strong> 或 "+" 按钮</li>
-    <li>填写 <strong>API Base URL</strong>（如 <code>https://api.anthropic.com</code> 或第三方端点）</li>
-    <li>填写 <strong>API Key</strong></li>
-    <li>类型选 <strong>Claude</strong></li>
-    <li>点 <strong>保存</strong>（不需要关闭 CC Switch 窗口）</li>
+    <li><strong>选供应商</strong>：从 13 个内置供应商里挑一个（Anthropic 官方、DeepSeek、智谱 GLM、Kimi、通义千问、MiniMax、豆包、Gemini、Grok、Groq、OpenRouter、硅基流动，或自定义中转站）</li>
+    <li><strong>填 Key</strong>：粘贴 API Key，需要时选一个模型（如 <code>claude-opus-4-8</code>、<code>deepseek-v4-pro</code>）</li>
+    <li><strong>测试</strong>：点"开始测试"确认 Key 和端点可用</li>
+    <li><strong>保存</strong>：保存后关闭浏览器页面，回到终端即可</li>
    </ul>
-   <p style="font-size:.9em;opacity:.7">如果卖家已经在 U 盘里预配置了 Provider，这一步会自动跳过。</p>
+   <p style="font-size:.9em;opacity:.7">如果卖家已经在 U 盘里预配置好了，这一步会自动跳过，直接进入对话。</p>
   </div>
  </div>
 
@@ -226,40 +226,62 @@ a:hover{text-decoration:underline}
  </div>
 </div>
 
+<div class="callout">
+ <span class="callout-icon">⚡</span>
+ <div>
+  <strong>零安装承诺：</strong>整个便携包不依赖宿主机环境，不需要你装 Python、Node 或任何运行时。配置中心用的运行时已经打包在 U 盘里，开箱即用。
+ </div>
+</div>
+
 <h2>关于 U 盘绑定</h2>
 
 <p>这块 U 盘已经为你配置好了 API 和绑定。<strong>你可以把 U 盘插到任何电脑使用</strong>，配置都跟着 U 盘走。但出于安全考虑，文件夹被复制到其他设备运行时会被拒绝。</p>
 
 <h2>切换大模型 / Provider</h2>
 
-<p>需要换不同的 API 提供商或不同 Key 时，打开 U 盘里的 <strong>CC Switch</strong> 工具：</p>
+<p>随时想换供应商或模型，<strong>不用重新跑首次配置</strong>，直接打开配置中心：</p>
 
+<div class="platform-grid">
+ <div class="card">
+  <strong>Windows</strong>
+  <span>命令行进入 U 盘目录后运行<br><code>ClaudePortable.bat --config</code></span>
+ </div>
+ <div class="card">
+  <strong>macOS</strong>
+  <span>终端里运行<br><code>./ClaudePortable.command --config</code></span>
+ </div>
+ <div class="card">
+  <strong>Linux</strong>
+  <span>终端里运行<br><code>./ClaudePortable.sh --config</code></span>
+ </div>
+</div>
+
+<p>浏览器会打开配置中心。在里面你可以：</p>
 <ul>
- <li><strong>Windows</strong>：打开 U 盘 → 进入 <code>bin\windows-x64\</code> 文件夹 → 双击 <code>cc-switch.exe</code></li>
- <li><strong>macOS</strong>：打开 U 盘 → 进入 <code>bin/macos-arm64/</code> 或 <code>bin/macos-x64/</code> 文件夹 → 双击 <code>cc-switch</code></li>
- <li><strong>Linux</strong>：进入 <code>bin/linux-x64/</code> 文件夹 → 双击 <code>cc-switch</code></li>
+ <li><strong>模型</strong>标签：改当前供应商、Key、模型，点"保存配置"即生效</li>
+ <li><strong>供应商</strong>标签：在已保存的多个供应商之间一键切换</li>
+ <li><strong>运维</strong>标签：诊断环境、查看配置（脱敏）、导出/导入配置、查看日志、解绑设备</li>
 </ul>
 
-<p>在 CC Switch 图形界面里：</p>
-<ul>
- <li><strong>添加新 Provider</strong>：点 "+" 或"添加"按钮，填入 Base URL 和 API Key，保存</li>
- <li><strong>切换 Provider</strong>：在 Provider 列表中点击对应的"激活"按钮</li>
- <li><strong>关闭 CC Switch</strong>：保存后直接关闭窗口即可</li>
-</ul>
-
-<p>下次双击启动文件时，Claude Code 会自动使用你激活的 Provider。<strong>不需要重新配置任何东西。</strong></p>
+<p>下次双击启动文件时，Claude Code 会自动使用你当前激活的供应商。<strong>不需要重新配置任何东西。</strong></p>
 
 <div class="callout">
  <span class="callout-icon">💡</span>
  <div>
-  <strong>小贴士：</strong>CC Switch 可以同时保存多个 Provider，比如 Anthropic 官方、MiniMax、DeepSeek 等。你随时一键切换，不用重新输 API Key。
+  <strong>小贴士：</strong>配置中心可以同时保存多个供应商，比如 Anthropic 官方、DeepSeek、智谱 GLM 等。随时一键切换，不用重新输 API Key。它和 CC Switch 共用同一份配置库，两边的修改互相同步。
  </div>
 </div>
 
+<h3>想用 CC Switch 原生界面？</h3>
+<p>配置中心已经能完成日常的供应商管理。如果你想用 CC Switch 的原生图形界面（带故障转移、多应用切换等高级功能），打开配置中心 → <strong>运维</strong>标签 → 点 <strong>"启动 CC Switch"</strong> 按钮即可。两边共用同一份配置库，改哪边都同步。</p>
+
 <h2>常见问题</h2>
 
-<h3>启动后说 "No provider found"</h3>
-<p>这种情况很少出现。如果遇到，先重新插拔 U 盘再双击启动文件。如果仍然有问题，联系卖家。</p>
+<h3>启动后说 "No provider found" 或没检测到配置</h3>
+<p>这种情况很少出现。如果遇到，先重新插拔 U 盘再双击启动文件。若仍有问题，用 <code>--config</code> 参数手动打开配置中心重新保存一次。</p>
+
+<h3>配置了 DeepSeek 但 Claude 界面显示 Opus 4.8？</h3>
+<p>这是旧版本的已知问题，已在最新版修复。请确认你的便携包是 <strong>v0.6.0 或更新版本</strong>。新版启动器会正确读取并传递你在配置中心选择的模型。</p>
 
 <h3>macOS 提示 "无法验证开发者" 或 "无权限执行"</h3>
 <p>第一次双击 <code>.command</code> 文件可能提示无法执行。两种处理方式：</p>
