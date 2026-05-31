@@ -22,6 +22,7 @@ Usage:
 """
 import json
 import os
+import secrets
 import sqlite3
 import sys
 import threading
@@ -41,6 +42,14 @@ CCS_DB = CCS_DIR / "cc-switch.db"
 
 PORT = 17580          # config-center port (distinct from cc-switch GUI)
 APP_TYPE = "claude"   # which cc-switch app_type this panel manages
+
+# Per-process CSRF token. Injected into the served HTML and required on
+# every write endpoint via the X-CC-Token header. A cross-origin attacker
+# (DNS-rebind or classic CSRF) cannot READ our HTML due to same-origin
+# policy, so they can't learn this token — blocking silent POSTs that
+# would otherwise hijack the user's API key (e.g. inject a malicious
+# ANTHROPIC_BASE_URL). Mirrors the OpenClaw config-server design.
+SERVER_TOKEN = secrets.token_hex(32)
 
 # ── Provider catalog ────────────────────────────────────────────────
 # Each provider maps to an Anthropic-compatible base_url. Claude Code
@@ -536,6 +545,10 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _html(self, html):
+        # Inject the per-process CSRF token so the page's JS can send it
+        # back on writes. Cross-origin attackers can't read this HTML
+        # (same-origin policy), so they can't obtain the token.
+        html = html.replace("__CC_TOKEN__", SERVER_TOKEN)
         body = html.encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -545,6 +558,13 @@ class Handler(BaseHTTPRequestHandler):
                          "default-src 'self' 'unsafe-inline'")
         self.end_headers()
         self.wfile.write(body)
+
+    def _csrf_ok(self):
+        """Require the per-process token on write requests. Blocks classic
+        CSRF: a cross-origin page can POST to us (Host passes), but cannot
+        read our token, so this header will be absent/wrong."""
+        tok = self.headers.get("X-CC-Token", "")
+        return secrets.compare_digest(tok, SERVER_TOKEN)
 
     def log_message(self, *a):
         pass
@@ -556,24 +576,19 @@ class Handler(BaseHTTPRequestHandler):
             if self.path in ("/", "/index.html"):
                 self._html(PAGE)
             elif self.path == "/api/state":
+                # Strip the full api_key from the public state — the UI
+                # never needs it (it shows a masked value via /api/view).
+                cur = read_current()
+                if cur:
+                    cur = {k: v for k, v in cur.items() if k != "api_key"}
                 self._json({
                     "providers_catalog": PROVIDERS,
-                    "current": read_current(),
+                    "current": cur,
                     "saved": list_providers(),
-                    "has_config": read_current() is not None,
+                    "has_config": cur is not None,
                 })
             elif self.path == "/api/heartbeat":
                 self._json({"alive": True})
-            elif self.path == "/api/export":
-                # Served as a downloadable attachment with all providers.
-                body = json.dumps(export_config(), ensure_ascii=False, indent=2).encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json; charset=utf-8")
-                self.send_header("Content-Disposition",
-                                 'attachment; filename="claude-portable-config.json"')
-                self.send_header("X-Content-Type-Options", "nosniff")
-                self.end_headers()
-                self.wfile.write(body)
             elif self.path == "/api/view":
                 self._json(view_config())
             elif self.path == "/api/logs":
@@ -587,6 +602,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         if self._reject_host():
+            return
+        # CSRF gate: all writes require the per-process token. Without
+        # this, a malicious page the user visits could silently POST
+        # /api/save with an attacker-controlled base_url and hijack the
+        # API key + all prompts. The Host pin alone does NOT stop this.
+        if not self._csrf_ok():
+            self._json({"ok": False, "error": "missing or invalid token"}, 403)
             return
         try:
             n = min(int(self.headers.get("Content-Length", 0)), 1_000_000)
@@ -613,6 +635,8 @@ class Handler(BaseHTTPRequestHandler):
             elif self.path == "/api/unbind":
                 removed = unbind_device()
                 self._json({"ok": True, "removed": removed})
+            elif self.path == "/api/export":
+                self._json(export_config())
             else:
                 self._json({"ok": False, "error": "not found"}, 404)
         except Exception as e:
