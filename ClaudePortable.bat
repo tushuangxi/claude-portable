@@ -12,12 +12,11 @@ REM Enable ANSI escape codes
 for /F %%a in ('echo prompt $E ^| cmd') do set "ESC=%%a"
 
 echo.
-echo %ESC%[38;5;220m  ██╗   ██╗██╗  ██╗   ██╗ ██████╗%ESC%[0m
-echo %ESC%[38;5;220m  ╚██╗ ██╔╝██║  ╚██╗ ██╔╝██╔════╝%ESC%[0m
-echo %ESC%[38;5;214m   ╚████╔╝ ██║   ╚████╔╝ ██║  ███╗%ESC%[0m
-echo %ESC%[38;5;214m    ╚██╔╝  ██║    ╚██╔╝  ██║   ██║%ESC%[0m
-echo %ESC%[38;5;166m     ██║   ███████╗██║   ╚██████╔╝%ESC%[0m
-echo %ESC%[38;5;166m     ╚═╝   ╚══════╝╚═╝    ╚═════╝%ESC%[0m
+echo %ESC%[38;5;220m  __   __ _    __   __ _____%ESC%[0m
+echo %ESC%[38;5;220m  \ \ / // \   \ \ / // ___%ESC%[0m
+echo %ESC%[38;5;214m   \ V // _ \   \ V /| |  _ %ESC%[0m
+echo %ESC%[38;5;214m    | |/ ___ \   | | | |_| |%ESC%[0m
+echo %ESC%[38;5;166m    |_/_/   \_\  |_|  \____|%ESC%[0m
 echo.
 echo      Claude Code Portable
 echo.
@@ -138,7 +137,7 @@ if not exist "%LIB_DIR%\binding.ps1" goto :binding_done
 
 REM Validate every existing lock. Both lock files should hold the same
 REM hash; any mismatch immediately denies launch. This is what makes
-REM the dual-lock design actually prevent bypass — replacing one lock
+REM the dual-lock design actually prevent bypass  --  replacing one lock
 REM with random bytes still gets caught when the other is checked.
 set "BIND_FAILED=0"
 set "BIND_WARNED=0"
@@ -282,7 +281,7 @@ timeout /t 2 >nul 2>&1
 set /a WAIT_COUNT+=1
 call :check_config
 if "!HAS_CONFIG!"=="1" goto :db_ready
-REM Detect config tool death — bail immediately rather than wait 5 min.
+REM Detect config tool death  --  bail immediately rather than wait 5 min.
 if "!USED_CONFIG_CENTER!"=="1" (
   REM config_server.py is a python process; check if port is still listening
   powershell -NoProfile -Command "try{$r=Invoke-WebRequest -Uri 'http://127.0.0.1:17580/api/heartbeat' -UseBasicParsing -TimeoutSec 1;exit 0}catch{exit 1}" >nul 2>&1
@@ -309,7 +308,7 @@ timeout /t 1 >nul 2>&1
 
 :load_config
 :: =============================================
-:: Read API config — capture via stdout (no plaintext API key
+:: Read API config  --  capture via stdout (no plaintext API key
 :: in %TEMP% files; previous TMP_URL/TMP_KEY would leak on crash).
 :: extract-config.ps1 writes URL on line 1, key on line 2 (or empty
 :: lines + exit 1 on failure).
@@ -405,10 +404,10 @@ if !errorlevel! EQU 0 exit /b 0
 REM It's a real directory (not a junction). This means the user has
 REM a pre-existing system install. Migrate its contents into our
 REM portable folder BEFORE replacing with a junction. Never rd /s /q
-REM a real user directory — that would destroy their data.
+REM a real user directory  --  that would destroy their data.
 if exist "%LINK%\*" (
   REM Only migrate if portable target is empty. If it already has data,
-  REM rename system dir as backup instead of merging — merging would
+  REM rename system dir as backup instead of merging  --  merging would
   REM let system files clobber portable files.
   set "TARGET_EMPTY=1"
   for /f %%X in ('dir /b /a "%TARGET%" 2^>nul ^| findstr /r ".*"') do set "TARGET_EMPTY=0"
@@ -417,7 +416,7 @@ if exist "%LINK%\*" (
     xcopy /e /i /y /q "%LINK%" "%TARGET%" >nul 2>&1
     REM CRITICAL: only rd if xcopy actually succeeded.
     REM xcopy returns 0 on success, 1-5 on partial/full failure.
-    REM Previously rd ran unconditionally → on disk-full or locked
+    REM Previously rd ran unconditionally  ->  on disk-full or locked
     REM file, user's data was destroyed.
     if !errorlevel! EQU 0 (
       rd /s /q "%LINK%" 2>nul
@@ -426,7 +425,7 @@ if exist "%LINK%\*" (
       exit /b 1
     )
   ) else (
-    REM Portable target not empty — back up system dir with timestamp.
+    REM Portable target not empty  --  back up system dir with timestamp.
     REM wmic was removed in Windows 11 24H2+. Use PowerShell to get
     REM the local time. Format: yyyyMMddHHmmss (14 chars), matching
     REM the previous wmic LocalDateTime layout.
@@ -436,7 +435,7 @@ if exist "%LINK%\*" (
     ren "%LINK%" "%~n1.before-portable.!TS!" >nul 2>&1
   )
   if exist "%LINK%" (
-    REM Could not remove or rename — files may be locked. Last-resort rename.
+    REM Could not remove or rename  --  files may be locked. Last-resort rename.
     ren "%LINK%" "%~n1.bak.%RANDOM%" >nul 2>&1
   )
 )
