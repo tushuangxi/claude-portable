@@ -12,13 +12,8 @@ REM Enable ANSI escape codes
 for /F %%a in ('echo prompt $E ^| cmd') do set "ESC=%%a"
 
 echo.
-echo %ESC%[38;5;220m  __   __ _    __   __ _____%ESC%[0m
-echo %ESC%[38;5;220m  \ \ / // \   \ \ / // ___%ESC%[0m
-echo %ESC%[38;5;214m   \ V // _ \   \ V /| |  _ %ESC%[0m
-echo %ESC%[38;5;214m    | |/ ___ \   | | | |_| |%ESC%[0m
-echo %ESC%[38;5;166m    |_/_/   \_\  |_|  \____|%ESC%[0m
-echo.
-echo      Claude Code Portable
+echo %ESC%[38;5;220m     Claude Code Portable%ESC%[0m
+echo %ESC%[38;5;214m     ----------------------%ESC%[0m
 echo.
 
 set "SCRIPT_DIR=%~dp0"
