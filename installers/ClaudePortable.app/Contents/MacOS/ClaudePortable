@@ -1,0 +1,22 @@
+#!/bin/bash
+# ClaudePortable.app launcher
+# Resolves portable root and delegates to ClaudePortable.command
+
+DIR="$(cd "$(dirname "$0")" && pwd)"
+# Walk up from ClaudePortable.app/Contents/MacOS/ to portable root
+PORTABLE="$(cd "$DIR/../../.." && pwd)"
+
+# Handle App Translocation (macOS Gatekeeper)
+if [[ "$PORTABLE" == /private/var/folders/* ]]; then
+    # We're in a translocation dir — find the real portable root
+    REAL=$(mdfind -name "ClaudePortable.command" -onlyin /Volumes 2>/dev/null | head -1)
+    if [ -n "$REAL" ]; then
+        PORTABLE="$(dirname "$REAL")"
+    fi
+fi
+
+if [ -f "$PORTABLE/ClaudePortable.command" ]; then
+    exec osascript -e "tell application \"Terminal\" to do script \"cd '$PORTABLE' && bash ClaudePortable.command\""
+else
+    osascript -e "display dialog \"找不到 ClaudePortable.command\n路径: $PORTABLE\" buttons {\"OK\"} default button 1 with icon stop"
+fi

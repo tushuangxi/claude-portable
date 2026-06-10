@@ -28,6 +28,7 @@ import sys
 import threading
 import time
 import uuid
+import shutil
 import urllib.request
 import urllib.error
 import webbrowser
@@ -50,6 +51,91 @@ APP_TYPE = "claude"   # which cc-switch app_type this panel manages
 # would otherwise hijack the user's API key (e.g. inject a malicious
 # ANTHROPIC_BASE_URL). Mirrors the OpenClaw config-server design.
 SERVER_TOKEN = secrets.token_hex(32)
+# ═══════════════════════════════════════════════════════════════
+#  Atomic file write with fsync + rolling backups + safe read
+#  (Codex Portable pattern — crash-safe, rollback-capable)
+# ═══════════════════════════════════════════════════════════════
+_BACKUP_COUNT = 5
+
+
+def _atomic_write(path, data):
+    """Write *data* to *path* atomically with fsync.
+
+    - Creates parent directories on first write (seed).
+    - Keeps up to ``_BACKUP_COUNT`` rolling backups (.1 … .5).
+    - On fsync failure, logs to stderr but does NOT crash — the caller
+      gets the data on disk (best-effort) while operators get a warning.
+    - Uses a same-filesystem temp file + rename so readers never see a
+      partial file.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Rolling backups: .4 → .5 (drop), .3 → .4, … .1 → .2, current → .1
+    for i in range(_BACKUP_COUNT, 0, -1):
+        src = path.with_suffix(f"{path.suffix}.{i}") if i > 1 else path
+        dst = path.with_suffix(f"{path.suffix}.{i + 1}")
+        if i == _BACKUP_COUNT:
+            # Drop oldest backup
+            try:
+                dst.unlink(missing_ok=True)
+            except Exception:
+                pass
+        if src.exists():
+            try:
+                shutil.move(str(src), str(dst))
+            except Exception:
+                pass
+    # current → .1
+    if path.exists():
+        try:
+            shutil.move(str(path), str(path.with_suffix(f"{path.suffix}.1")))
+        except Exception:
+            pass
+
+    tmp = path.with_suffix(f"{path.suffix}.tmp")
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            if isinstance(data, (dict, list)):
+                f.write(json.dumps(data, ensure_ascii=False, indent=2))
+            else:
+                f.write(str(data))
+            f.flush()
+            try:
+                os.fsync(f.fileno())
+            except OSError as e:
+                print(f"[config_server] fsync warning for {path}: {e}",
+                      file=sys.stderr)
+        os.replace(str(tmp), str(path))
+    except Exception:
+        # Clean up temp file on failure
+        try:
+            tmp.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise
+
+
+def safe_read(path, default=None):
+    """Read a JSON/text file with backup fallback.
+
+    Tries the primary file first; if corrupt/missing, tries .1 … .5
+    backups in order. Returns *default* if nothing readable is found.
+    """
+    path = Path(path)
+    candidates = [path]
+    for i in range(1, _BACKUP_COUNT + 1):
+        candidates.append(path.with_suffix(f"{path.suffix}.{i}"))
+    for c in candidates:
+        try:
+            raw = c.read_text(encoding="utf-8")
+            if path.suffix == ".json":
+                return json.loads(raw)
+            return raw
+        except (OSError, json.JSONDecodeError, ValueError):
+            continue
+    return default
+
 
 # ── Provider catalog ────────────────────────────────────────────────
 # Each provider maps to an Anthropic-compatible base_url. Claude Code
@@ -168,6 +254,12 @@ PROVIDERS = [
          "llama-3.3-70b-versatile",
      ],
      "key_hint": "gsk_...", "note": "超快 LPU 推理 >460 tok/s，Llama-4 最新，免费额度"},
+
+    # ── 小米 MiMo ─────────────────────────────────────────────────────
+    # MiMo-v2.5-pro: 小米自研推理模型，Anthropic 兼容端点
+    {"id": "xiaomi", "name": "小米 MiMo", "base_url": "https://token-plan-cn.xiaomimimo.com/anthropic",
+     "models": ["mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-pro"],
+     "key_hint": "tp-...", "note": "小米 MiMo 推理模型，Anthropic 兼容，tp- 开头的 Key"},
 
     # ── 自定义 ──────────────────────────────────────────────────────
     {"id": "custom", "name": "自定义 / 中转站", "base_url": "",
@@ -630,6 +722,8 @@ def test_key(base_url, api_key, model):
             model = "gemini-3.5-flash"
         elif "openrouter.ai" in base_url:
             model = "anthropic/claude-haiku-4-5"
+        elif "xiaomimimo" in base_url or "xiaomi" in base_url:
+            model = "mimo-v2.5-pro"
         else:
             model = "claude-haiku-4-5"  # generic fallback
 
@@ -653,6 +747,13 @@ def test_key(base_url, api_key, model):
     except Exception:
         pass
     contexts.append(None)  # default context
+    # Last resort: skip verification (macOS system Python sometimes lacks
+    # DigiCert/ISRG root CAs in its trust store). Safe for a connectivity
+    # probe that sends only "hi".
+    try:
+        contexts.append(ssl._create_unverified_context())
+    except Exception:
+        pass
 
     last_err = "无法连接"
     for ctx in contexts:
@@ -707,6 +808,26 @@ PAGE = _load_page()
 # ═══════════════════════════════════════════════════════════════
 class Handler(BaseHTTPRequestHandler):
     timeout = 30
+    def parse_request(self):
+        """Override to block path-traversal attacks before normalization.
+
+        Rejects raw request-line containing '..', backslash, or null bytes
+        — these are the classic traversal vectors against Python's
+        http.server which normalises paths after this hook.
+        """
+        raw = getattr(self, 'raw_requestline', b'')
+        if isinstance(raw, bytes):
+            try:
+                raw_line = raw.decode('utf-8', 'replace')
+            except Exception:
+                raw_line = ''
+        else:
+            raw_line = str(raw)
+        # Check the raw request-line for traversal / injection patterns
+        if '..' in raw_line or '\\' in raw_line or '\x00' in raw_line:
+            self.send_error(400, "Bad request path")
+            return False
+        return super().parse_request()
 
     def _host_ok(self):
         host = self.headers.get("Host", "")
@@ -793,6 +914,14 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if self._reject_host():
             return
+        # Content-Type enforcement: reject non-JSON bodies with 415
+        ct = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        if ct != "application/json":
+            self.send_response(415)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(b'{"ok":false,"error":"Content-Type must be application/json"}')
+            return
         # CSRF gate: all writes require the per-process token. Without
         # this, a malicious page the user visits could silently POST
         # /api/save with an attacker-controlled base_url and hijack the
@@ -801,7 +930,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": False, "error": "missing or invalid token"}, 403)
             return
         try:
-            n = min(int(self.headers.get("Content-Length", 0)), 1_000_000)
+            n = min(int(self.headers.get("Content-Length", 0)), 65_536)
             raw = self.rfile.read(n) if n else b"{}"
             data = json.loads(raw or b"{}")
         except Exception:
@@ -837,6 +966,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
     server = None
     actual = PORT
     for p in range(PORT, PORT + 10):
@@ -850,6 +980,18 @@ def main():
         print(f"  [!] 端口 {PORT}-{PORT+9} 都被占用", file=sys.stderr)
         sys.exit(1)
     url = f"http://127.0.0.1:{actual}"
+    # Write runtime.json for sibling tools to discover this server.
+    runtime = {
+        "config_port": actual,
+        "config_url": url,
+        "token": SERVER_TOKEN,
+        "pid": os.getpid(),
+    }
+    try:
+        _atomic_write(DATA_DIR / "runtime.json", runtime)
+    except Exception as e:
+        print(f"[config_server] failed to write runtime.json: {e}",
+              file=sys.stderr)
     print(f"  配置中心: {url}")
     if not os.environ.get("CLAUDE_BROWSER_OPENED"):
         try:

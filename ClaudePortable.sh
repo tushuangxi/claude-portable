@@ -1,10 +1,55 @@
 #!/bin/bash
+set -u
 # ═══════════════════════════════════════════
 # Claude Code Portable + CC Switch · Linux
 # ═══════════════════════════════════════════
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+APP_TYPE='claude'
+CONFIG_PORT=17580
 ARCH="$(uname -m)"
+
+# ── resolve_python3 ──────────────────────────────────────
+# Prefer bundled python3 (portable, no system dependency),
+# fall back to system python3.
+resolve_python3() {
+    local bundled="$SCRIPT_DIR/bin/linux-x64/python3"
+    if [ -x "$bundled" ]; then
+        PYTHON3="$bundled"
+        return 0
+    fi
+    if command -v python3 &>/dev/null; then
+        PYTHON3="$(command -v python3)"
+        return 0
+    fi
+    PYTHON3=""
+    return 1
+}
+resolve_python3
+
+# ── Preflight checks ─────────────────────────────────────
+preflight() {
+    local errors=0
+    local bin_dir="$SCRIPT_DIR/bin/linux-x64"
+    if [ ! -f "$bin_dir/claude" ]; then
+        echo "  [preflight] FAIL: claude binary not found at $bin_dir/claude"
+        errors=$((errors + 1))
+    fi
+    if [ ! -f "$SCRIPT_DIR/lib/config_server.py" ]; then
+        echo "  [preflight] WARN: config_server.py not found (config UI unavailable)"
+    fi
+    mkdir -p "$SCRIPT_DIR/data" 2>/dev/null
+    if [ ! -w "$SCRIPT_DIR/data" ]; then
+        echo "  [preflight] FAIL: data directory is not writable: $SCRIPT_DIR/data"
+        errors=$((errors + 1))
+    fi
+    mkdir -p "$SCRIPT_DIR/data/logs" 2>/dev/null
+    if [ $errors -gt 0 ]; then
+        echo "  [preflight] $errors error(s) detected. Fix issues above and retry."
+        exit 1
+    fi
+}
+preflight
 
 # 处理 --unlock 参数（删除两个 lock 文件）
 if [ "${1:-}" = "--unlock" ]; then
@@ -24,9 +69,9 @@ fi
 # 处理 --config 参数（随时打开配置中心）
 if [ "${1:-}" = "--config" ]; then
     CONFIG_SERVER="$SCRIPT_DIR/lib/config_server.py"
-    if command -v python3 &>/dev/null && [ -f "$CONFIG_SERVER" ]; then
+    if [ -n "${PYTHON3:-}" ] && [ -x "${PYTHON3:-}" ] && [ -f "$CONFIG_SERVER" ]; then
         echo "  打开配置中心 http://127.0.0.1:17580 ..."
-        exec python3 "$CONFIG_SERVER"
+        exec "$PYTHON3" "$CONFIG_SERVER"
     elif [ -x "$SCRIPT_DIR/bin/linux-x64/cc-switch" ]; then
         exec "$SCRIPT_DIR/bin/linux-x64/cc-switch"
     else
@@ -291,7 +336,8 @@ if ! has_valid_config; then
         echo "  正在打开配置中心 http://127.0.0.1:17580 ..."
         echo "  按引导选供应商、填 Key、测试、保存即可。"
         echo ""
-        python3 "$CONFIG_SERVER" >/dev/null 2>&1 &
+        mkdir -p "$SCRIPT_DIR/data/logs" 2>/dev/null
+        "${PYTHON3:-python3}" "$CONFIG_SERVER" >>"$SCRIPT_DIR/data/logs/config_server.log" 2>&1 &
         CC_SWITCH_PID=$!
         WE_STARTED_CCS=1
     else

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Claude Portable
+Comment=Claude CLI Portable + CC Switch
+Exec=bash -c 'cd "$(dirname "$(readlink -f "%k")")" && bash ClaudePortable.sh'
+Icon=utilities-terminal
+Terminal=true
+Categories=Development;
+Keywords=claude;ai;cli;portable;

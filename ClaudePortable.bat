@@ -39,11 +39,26 @@ REM sqlite3.exe is dead weight and the config readers fall straight
 REM through to the unreliable regex fallback.
 set "PATH=%BIN_DIR%;%PATH%"
 
+:: =============================================
+:: Preflight checks
+:: =============================================
 if not exist "%BIN_DIR%\claude.exe" (
-  echo [ERROR] Claude Code not found
+  echo   [preflight] FAIL: claude.exe not found at %BIN_DIR%\claude.exe
   pause
   exit /b 1
 )
+if not exist "%LIB_DIR%\config_server.py" (
+  echo   [preflight] WARN: config_server.py not found ^(config UI unavailable^)
+)
+if not exist "%PORTABLE_DATA%" mkdir "%PORTABLE_DATA%" >nul 2>&1
+echo test > "%PORTABLE_DATA%\.writable_test" 2>nul
+if not exist "%PORTABLE_DATA%\.writable_test" (
+  echo   [preflight] FAIL: data directory is not writable: %PORTABLE_DATA%
+  pause
+  exit /b 1
+)
+del /q "%PORTABLE_DATA%\.writable_test" >nul 2>&1
+if not exist "%PORTABLE_DATA%\logs" mkdir "%PORTABLE_DATA%\logs" >nul 2>&1
 
 :: =============================================
 :: Handle --unlock argument
@@ -256,7 +271,8 @@ if defined PY_CMD (
     echo   Opening config center at http://127.0.0.1:17580 ...
     echo   Follow the wizard: pick provider, paste key, test, save.
     echo.
-    start "" /b !PY_CMD! "%CONFIG_SERVER%"
+    if not exist "%PORTABLE_DATA%\logs" mkdir "%PORTABLE_DATA%\logs" >nul 2>&1
+    start "" /b cmd /c !PY_CMD! "%CONFIG_SERVER%" >>"%PORTABLE_DATA%\logs\config_server.log" 2>&1
     set "WE_STARTED_CCS=1"
     set "USED_CONFIG_CENTER=1"
 ) else if exist "%BIN_DIR%\cc-switch.exe" (

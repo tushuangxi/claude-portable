@@ -1,10 +1,68 @@
 #!/bin/bash
+set -u
 # ═══════════════════════════════════════════
 # Claude Code Portable + CC Switch · macOS
 # ═══════════════════════════════════════════
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+APP_TYPE='claude'
+CONFIG_PORT=17580
 ARCH="$(uname -m)"
+
+# ── resolve_python3 ──────────────────────────────────────
+# Prefer bundled python3 (portable, no system dependency),
+# fall back to system python3.
+resolve_python3() {
+    local bundled=""
+    case "$ARCH" in
+        arm64)  bundled="$SCRIPT_DIR/bin/macos-arm64/python3" ;;
+        x86_64) bundled="$SCRIPT_DIR/bin/macos-x64/python3" ;;
+    esac
+    if [ -n "$bundled" ] && [ -x "$bundled" ]; then
+        PYTHON3="$bundled"
+        return 0
+    fi
+    if command -v python3 &>/dev/null; then
+        PYTHON3="$(command -v python3)"
+        return 0
+    fi
+    PYTHON3=""
+    return 1
+}
+resolve_python3
+
+# ── Preflight checks ─────────────────────────────────────
+preflight() {
+    local errors=0
+    # Check claude binary exists (done again later, but fail early)
+    local bin_sub
+    case "$ARCH" in
+        arm64)  bin_sub="macos-arm64" ;;
+        x86_64) bin_sub="macos-x64" ;;
+    esac
+    local bin_dir="$SCRIPT_DIR/bin/$bin_sub"
+    if [ ! -f "$bin_dir/claude" ]; then
+        echo "  [preflight] FAIL: claude binary not found at $bin_dir/claude"
+        errors=$((errors + 1))
+    fi
+    # Check config_server.py exists
+    if [ ! -f "$SCRIPT_DIR/lib/config_server.py" ]; then
+        echo "  [preflight] WARN: config_server.py not found (config UI unavailable)"
+    fi
+    # Check data dir is writable
+    mkdir -p "$SCRIPT_DIR/data" 2>/dev/null
+    if [ ! -w "$SCRIPT_DIR/data" ]; then
+        echo "  [preflight] FAIL: data directory is not writable: $SCRIPT_DIR/data"
+        errors=$((errors + 1))
+    fi
+    # Ensure logs dir exists
+    mkdir -p "$SCRIPT_DIR/data/logs" 2>/dev/null
+    if [ $errors -gt 0 ]; then
+        echo "  [preflight] $errors error(s) detected. Fix issues above and retry."
+        exit 1
+    fi
+}
+preflight
 
 # 处理 --unlock 参数（删除两个 lock 文件）
 if [ "${1:-}" = "--unlock" ]; then
@@ -24,9 +82,9 @@ fi
 # 处理 --config 参数（随时打开配置中心，不启动 Claude）
 if [ "${1:-}" = "--config" ]; then
     CONFIG_SERVER="$SCRIPT_DIR/lib/config_server.py"
-    if command -v python3 &>/dev/null && [ -f "$CONFIG_SERVER" ]; then
+    if [ -n "${PYTHON3:-}" ] && [ -x "${PYTHON3:-}" ] && [ -f "$CONFIG_SERVER" ]; then
         echo "  打开配置中心 http://127.0.0.1:17580 ..."
-        exec python3 "$CONFIG_SERVER"
+        exec "$PYTHON3" "$CONFIG_SERVER"
     elif [ -x "$SCRIPT_DIR/bin/macos-arm64/cc-switch" ] || [ -x "$SCRIPT_DIR/bin/macos-x64/cc-switch" ]; then
         ARCH_CC="$(uname -m)"; CCBIN="$SCRIPT_DIR/bin/macos-x64/cc-switch"
         [ "$ARCH_CC" = "arm64" ] && CCBIN="$SCRIPT_DIR/bin/macos-arm64/cc-switch"
@@ -320,7 +378,8 @@ if ! has_valid_config; then
         echo "  正在打开配置中心 http://127.0.0.1:17580 ..."
         echo "  按引导选供应商、填 Key、测试、保存即可。"
         echo ""
-        python3 "$CONFIG_SERVER" >/dev/null 2>&1 &
+        mkdir -p "$SCRIPT_DIR/data/logs" 2>/dev/null
+        "${PYTHON3:-python3}" "$CONFIG_SERVER" >>"$SCRIPT_DIR/data/logs/config_server.log" 2>&1 &
         CC_SWITCH_PID=$!
         WE_STARTED_CCS=1
     elif [ -x "$BIN_DIR/cc-switch" ]; then
@@ -365,6 +424,17 @@ if ! has_valid_config; then
     if ! has_valid_config; then
         echo "  [!] 等待超时，请重新运行"
         exit 1
+    fi
+else
+    # 已有配置，仍然启动配置中心（后台非阻塞），方便随时修改 Key
+    CONFIG_SERVER="$LIB_DIR/config_server.py"
+    if [ -n "${PYTHON3:-}" ] && [ -f "$CONFIG_SERVER" ]; then
+        echo "  配置中心已启动: http://127.0.0.1:17580"
+        echo "  （如需修改 Key，在浏览器中操作后保存即可）"
+        mkdir -p "$SCRIPT_DIR/data/logs" 2>/dev/null
+        "$PYTHON3" "$CONFIG_SERVER" >>"$SCRIPT_DIR/data/logs/config_server.log" 2>&1 &
+        CC_SWITCH_PID=$!
+        WE_STARTED_CCS=1
     fi
 fi
 
@@ -472,6 +542,47 @@ else
     echo "  [!] 无法从 DB 读取配置"
     exit 1
 fi
+
+# ═══════════════════════════════════════════
+# 同步 env 到 .claude/settings.json
+# Claude Code 优先读 settings.json 的 env，如果不同步，
+# 旧的 settings.json 会覆盖启动器注入的环境变量。
+# ═══════════════════════════════════════════
+CLAUDE_SETTINGS="$PORTABLE_CLAUDE/settings.json"
+sync_claude_settings() {
+    command -v python3 &>/dev/null || return 0
+    CCS_ENV_MODEL="${ANTHROPIC_MODEL:-}" \
+    CCS_ENV_URL="$ANTHROPIC_BASE_URL" \
+    CCS_ENV_KEY="$ANTHROPIC_AUTH_TOKEN" \
+    CCS_SETTINGS_FILE="$CLAUDE_SETTINGS" \
+    python3 - <<'PYEOF' 2>/dev/null
+import json, os
+sf = os.environ['CCS_SETTINGS_FILE']
+try:
+    with open(sf, 'r') as f:
+        cfg = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    cfg = {}
+env = cfg.get('env', {})
+changed = False
+for k, v in [
+    ('ANTHROPIC_BASE_URL', os.environ['CCS_ENV_URL']),
+    ('ANTHROPIC_AUTH_TOKEN', os.environ['CCS_ENV_KEY']),
+    ('ANTHROPIC_MODEL', os.environ.get('CCS_ENV_MODEL', '')),
+]:
+    if v and env.get(k) != v:
+        env[k] = v
+        changed = True
+# 清除可能残留的旧模型别名（如 MiniMax 的 DEFAULT_*_MODEL）
+if changed:
+    for alias in ('ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_OPUS_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL'):
+        env.pop(alias, None)
+    cfg['env'] = env
+    with open(sf, 'w') as f:
+        json.dump(cfg, f, indent=2, ensure_ascii=False)
+PYEOF
+}
+sync_claude_settings
 
 # ═══════════════════════════════════════════
 # 创建/修复绑定锁（首次成功运行后，写入两个位置）
