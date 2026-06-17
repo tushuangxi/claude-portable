@@ -208,18 +208,27 @@ if not exist "%PORTABLE_CLAUDE%" mkdir "%PORTABLE_CLAUDE%"
 :: =============================================
 :: Create junctions (or symlinks if cross-volume)
 :: =============================================
-call :ensure_link "%SYS_CCS%" "%PORTABLE_CCS%"
-if !errorlevel! NEQ 0 (
-  echo   [ERROR] Cannot create link for .cc-switch
-  echo   Try enabling Developer Mode in Windows Settings.
-  pause
-  exit /b 1
+:: Check if filesystem supports symlinks (NTFS vs FAT32/exFAT)
+set "USE_LINKS=1"
+for %%D in ("%SCRIPT_DIR%") do set "DRIVE=%%~dD"
+if defined DRIVE (
+  fsutil fsinfo volumeinfo "!DRIVE!" 2>nul | find /i "FAT" >nul && set "USE_LINKS=0"
 )
-call :ensure_link "%SYS_CLAUDE%" "%PORTABLE_CLAUDE%"
-if !errorlevel! NEQ 0 (
-  echo   [ERROR] Cannot create link for .claude
-  pause
-  exit /b 1
+if "!USE_LINKS!"=="0" (
+  echo   [INFO] FAT32 detected, using portable dir directly
+  set "SYS_CCS=%PORTABLE_CCS%"
+  set "SYS_CLAUDE=%PORTABLE_CLAUDE%"
+) else (
+  call :ensure_link "%SYS_CCS%" "%PORTABLE_CCS%"
+  if !errorlevel! NEQ 0 (
+    echo   [WARN] Symlink failed, using portable dir directly
+    set "SYS_CCS=%PORTABLE_CCS%"
+  )
+  call :ensure_link "%SYS_CLAUDE%" "%PORTABLE_CLAUDE%"
+  if !errorlevel! NEQ 0 (
+    echo   [WARN] Symlink failed, using portable dir directly
+    set "SYS_CLAUDE=%PORTABLE_CLAUDE%"
+  )
 )
 
 set "CCS_DB=%PORTABLE_CCS%\cc-switch.db"
